@@ -33,8 +33,28 @@ std::vector<OPSCommand> SyntaxAnalyzer::analyze(const std::vector<Token>& inputT
 }
 
 void SyntaxAnalyzer::parseProgram() {
+    int iterationsCount = 0;
+    int lastToken = -1;
+    
     while (currentToken < tokens.size()) {
+        // Защита от бесконечного цикла
+        if (currentToken == lastToken) {
+            iterationsCount++;
+            if (iterationsCount > 1000) {
+                throw std::runtime_error("Parser stuck in infinite loop at token " + std::to_string(currentToken));
+            }
+        } else {
+            iterationsCount = 0;
+            lastToken = currentToken;
+        }
+        
+        size_t tokenBefore = currentToken;
         parseStatement();
+        
+        // Если токен не продвинулся, принудительно продвигаем чтобы избежать зависания
+        if (currentToken == tokenBefore && currentToken < tokens.size()) {
+            currentToken++;
+        }
     }
 }
 
@@ -42,6 +62,12 @@ void SyntaxAnalyzer::parseStatement() {
     if (currentToken >= tokens.size()) return;
     
     const Token& token = tokens[currentToken];
+    
+    // Пропускаем EOF токены
+    if (token.getType() == "EOF") {
+        currentToken++;
+        return;
+    }
     
     if (token.getType() == "KEYWORD") {
         if (token.getValue() == "int") {
@@ -54,14 +80,22 @@ void SyntaxAnalyzer::parseStatement() {
             parseReadStatement();
         } else if (token.getValue() == "write") {
             parseWriteStatement();
+        } else if (token.getValue() == "input") {
+            parseReadStatement(); // input() = read()
+        } else if (token.getValue() == "output") {
+            parseWriteStatement(); // output() = write()
         } else if (token.getValue() == "mem1") {
             parseMem1Statement();
         } else if (token.getValue() == "mem2") {
             parseMem2Statement();
+        } else {
+            // Неизвестное ключевое слово - пропускаем
+            currentToken++;
         }
     } else if (token.getType() == "IDENTIFIER") {
         parseAssignment();
     } else {
+        // Все остальные токены пропускаем
         currentToken++;
     }
 }
@@ -76,8 +110,9 @@ void SyntaxAnalyzer::parseDeclaration() {
         
         if (currentToken < tokens.size() && tokens[currentToken].getValue() == "=") {
             currentToken++; // пропускаем '='
-            parseExpression(); // генерирует ОПС для выражения
-            opsCode.push_back(varName + " :="); // добавляем присваивание
+            parseExpression(); // генерирует ОПС для выражения (значение уже в стеке)
+            opsCode.push_back(varName); // добавляем имя переменной
+            opsCode.push_back(":="); // добавляем операцию присваивания
         }
         
         // пропускаем ';'
@@ -90,7 +125,6 @@ void SyntaxAnalyzer::parseDeclaration() {
 void SyntaxAnalyzer::parseAssignment() {
     // x = value; ИЛИ M[i] = value;
     std::string varName = tokens[currentToken].getValue();
-    opsCode.push_back(varName); // добавляем имя переменной/массива
     currentToken++;
     
     // Проверяем на доступ к массиву M[i]
@@ -111,7 +145,8 @@ void SyntaxAnalyzer::parseAssignment() {
     
     if (currentToken < tokens.size() && tokens[currentToken].getValue() == "=") {
         currentToken++; // пропускаем '='
-        parseExpression(); // генерирует ОПС для выражения
+        parseExpression(); // генерирует ОПС для выражения (значение в стеке)
+        opsCode.push_back(varName); // добавляем имя переменной ПОСЛЕ значения
         opsCode.push_back(":="); // добавляем присваивание
     }
     
@@ -122,7 +157,7 @@ void SyntaxAnalyzer::parseAssignment() {
 }
 
 void SyntaxAnalyzer::parseIfStatement() {
-    // if (condition) { statements }
+    // if (condition) { statements } [else { statements }]
     currentToken++; // пропускаем 'if'
     
     // Проверяем наличие открывающей скобки
@@ -147,8 +182,11 @@ void SyntaxAnalyzer::parseIfStatement() {
         }
     }
     
+    std::string elseLabel = "m" + std::to_string(labelCounter++);
     std::string endLabel = "m" + std::to_string(labelCounter++);
-    opsCode.push_back(endLabel + " jf"); // условный переход
+    
+    opsCode.push_back(elseLabel); // метка для перехода
+    opsCode.push_back("jf");      // команда условного перехода
     
     currentToken++; // пропускаем ')'
     
@@ -175,7 +213,44 @@ void SyntaxAnalyzer::parseIfStatement() {
     
     currentToken++; // пропускаем '}'
     
-    opsCode.push_back(endLabel + ":"); // метка конца if
+    // Проверяем на else
+    if (currentToken < tokens.size() && tokens[currentToken].getType() == "KEYWORD" && 
+        tokens[currentToken].getValue() == "else") {
+        
+        opsCode.push_back(endLabel); // метка для безусловного перехода
+        opsCode.push_back("j");      // команда безусловного перехода
+        opsCode.push_back(elseLabel + ":"); // метка начала else
+        
+        currentToken++; // пропускаем 'else'
+        
+        // Проверяем наличие открывающей фигурной скобки для else
+        if (currentToken >= tokens.size() || tokens[currentToken].getType() != "LEFT_BRACE") {
+            if (currentToken < tokens.size()) {
+                error("Expected '{' after 'else'", tokens[currentToken]);
+            } else {
+                throw std::runtime_error("Unexpected end of input after 'else'");
+            }
+        }
+        
+        currentToken++; // пропускаем '{'
+        
+        // парсим тело else
+        while (currentToken < tokens.size() && tokens[currentToken].getType() != "RIGHT_BRACE") {
+            parseStatement();
+        }
+        
+        // Проверяем наличие закрывающей фигурной скобки для else
+        if (currentToken >= tokens.size() || tokens[currentToken].getType() != "RIGHT_BRACE") {
+            throw std::runtime_error("Unexpected end of input - missing '}' after else");
+        }
+        
+        currentToken++; // пропускаем '}'
+        
+        opsCode.push_back(endLabel + ":"); // метка конца всей конструкции if-else
+    } else {
+        // Нет else, просто добавляем метку конца if
+        opsCode.push_back(elseLabel + ":"); // метка конца if
+    }
 }
 
 void SyntaxAnalyzer::parseWhileStatement() {
@@ -192,7 +267,8 @@ void SyntaxAnalyzer::parseWhileStatement() {
         
         parseCondition(); // генерирует ОПС для условия
         
-        opsCode.push_back(endLabel + " jf"); // условный переход на конец
+        opsCode.push_back(endLabel); // метка для условного перехода
+        opsCode.push_back("jf");     // команда условного перехода на конец
         
         if (currentToken < tokens.size() && tokens[currentToken].getType() == "RIGHT_PAREN") {
             currentToken++; // пропускаем ')'
@@ -211,15 +287,29 @@ void SyntaxAnalyzer::parseWhileStatement() {
             }
         }
         
-        opsCode.push_back(startLabel + " j"); // безусловный переход на начало
+        opsCode.push_back(startLabel); // метка для безусловного перехода
+        opsCode.push_back("j");        // команда безусловного перехода на начало
         opsCode.push_back(endLabel + ":"); // метка конца цикла
     }
 }
 
 void SyntaxAnalyzer::parseExpression() {
     std::stack<std::string> operatorStack;
+    int iterationsCount = 0;
+    size_t lastToken = currentToken;
     
     while (currentToken < tokens.size()) {
+        // Защита от бесконечного цикла
+        if (currentToken == lastToken) {
+            iterationsCount++;
+            if (iterationsCount > 100) {
+                throw std::runtime_error("Expression parser stuck in infinite loop at token " + std::to_string(currentToken));
+            }
+        } else {
+            iterationsCount = 0;
+            lastToken = currentToken;
+        }
+        
         const Token& token = tokens[currentToken];
         
         if (token.getType() == "NUMBER" || token.getType() == "IDENTIFIER") {
@@ -296,8 +386,21 @@ void SyntaxAnalyzer::parseExpression() {
 // Новый метод для парсинга условий в if/while
 void SyntaxAnalyzer::parseCondition() {
     std::stack<std::string> operatorStack;
+    int iterationsCount = 0;
+    size_t lastToken = currentToken;
     
     while (currentToken < tokens.size()) {
+        // Защита от бесконечного цикла
+        if (currentToken == lastToken) {
+            iterationsCount++;
+            if (iterationsCount > 100) {
+                throw std::runtime_error("Condition parser stuck in infinite loop at token " + std::to_string(currentToken));
+            }
+        } else {
+            iterationsCount = 0;
+            lastToken = currentToken;
+        }
+        
         const Token& token = tokens[currentToken];
         
         if (token.getType() == "NUMBER" || token.getType() == "IDENTIFIER") {
@@ -472,7 +575,8 @@ void processCode(const std::string& code, const std::string& description) {
             }
         }
         catch (const std::exception& e) {
-            std::cout << "❌ Ошибка выполнения ОПС: " << e.what() << std::endl;
+            std::cout << "❌ ОШИБКА ВЫПОЛНЕНИЯ ОПС: " << e.what() << std::endl;
+            std::cout << "⚠️  Выполнение остановлено." << std::endl;
         }
     }
     catch (const std::exception& e) {

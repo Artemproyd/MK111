@@ -200,8 +200,13 @@ void Lexer::advance() {
 }
 
 void Lexer::skipWhitespace() {
-    while (pos < input.length() && (input[pos] == ' ' || input[pos] == '\t' || input[pos] == '\r')) {
-        advance();
+    while (pos < input.length()) {
+        char c = input[pos];
+        if (c == ' ' || c == '\t' || c == '\r') {
+            advance();
+        } else {
+            break;
+        }
     }
 }
 
@@ -212,7 +217,7 @@ std::vector<Token> Lexer::tokenize() {
     int startLine = line;
     int startColumn = column;
     
-    while (pos <= input.length()) {
+    while (pos < input.length()) {
         char c = getCurrentChar();
         CharCategory category = getCharCategory(c);
         
@@ -233,7 +238,7 @@ std::vector<Token> Lexer::tokenize() {
             // Нет перехода - ошибка
             throw std::runtime_error("Lexical error at line " + std::to_string(line) + 
                                    ", column " + std::to_string(column) + 
-                                   ": unexpected character '" + c + "'");
+                                   ": unexpected character '" + c + "' (ASCII: " + std::to_string((int)c) + ")");
         }
         
         LexState nextState = transition->second.first;
@@ -246,6 +251,7 @@ std::vector<Token> Lexer::tokenize() {
                 currentLexeme = c;
                 advance();
             }
+            // Если не в S состоянии, не потребляем символ - он будет обработан в следующей итерации
             
             std::string tokenType = getTokenType(action, currentLexeme);
             if (tokenType != "UNKNOWN" && action != 26) { // не EOF
@@ -278,11 +284,22 @@ std::vector<Token> Lexer::tokenize() {
             currentState = nextState;
             advance();
         }
-        
-        if (c == '\0') break;
     }
     
-    if (!tokens.empty() && tokens.back().getType() != "EOF") {
+    // Завершаем последний токен если остался незавершенным
+    if (!currentLexeme.empty() && currentState != LexState::S) {
+        // Попробуем завершить токен принудительно
+        auto finTransition = transitions.find({currentState, CharCategory::END_OF_FILE});
+        if (finTransition != transitions.end() && finTransition->second.first == LexState::FIN) {
+            std::string tokenType = getTokenType(finTransition->second.second, currentLexeme);
+            if (tokenType != "UNKNOWN") {
+                tokens.emplace_back(tokenType, currentLexeme, startLine, startColumn);
+            }
+        }
+    }
+    
+    // Добавляем EOF если его еще нет
+    if (tokens.empty() || tokens.back().getType() != "EOF") {
         tokens.emplace_back("EOF", "", line, column);
     }
     

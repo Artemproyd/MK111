@@ -46,6 +46,8 @@ private:
     void executeArithmetic(const std::string& op);   // Арифметические операции
     void executeComparison(const std::string& op);   // Операции сравнения
     void executeAssignment();                        // Присваивание (:=)
+    void executeRead();                              // Чтение (r)
+    void executeWrite();                             // Запись (w)
     void executeJump(const std::string& label);      // Безусловный переход (j)
     void executeConditionalJump(const std::string& label); // Условный переход (jf)
     

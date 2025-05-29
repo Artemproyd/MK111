@@ -47,11 +47,48 @@ void OPSInterpreter::execute(const std::vector<std::string>& opsCommands) {
             pushStack(value);
             std::cout << " → стек: " << value;
         }
-        else if (isVariable(command)) {
-            // Переменная - помещаем её значение в стек
-            int value = getVariable(command);
-            pushStack(value);
-            std::cout << " → стек: " << command << "=" << value;
+        else if (command == ":=") {
+            // Присваивание
+            executeAssignment();
+            std::cout << " → присваивание";
+        }
+        else if (command == "r") {
+            // Операция чтения (read/input)
+            executeRead();
+            std::cout << " → чтение";
+        }
+        else if (command == "w") {
+            // Операция записи (write/output)
+            executeWrite();
+            std::cout << " → запись";
+        }
+        else if (command == "jf") {
+            // Условный переход - метка должна быть предыдущей командой
+            if (programCounter > 0) {
+                std::string label = commands[programCounter - 1];
+                size_t oldPC = programCounter;
+                executeConditionalJump(label);
+                std::cout << " → условный переход к " << label;
+                
+                // Если programCounter изменился, значит произошел переход
+                if (programCounter != oldPC) {
+                    continue; // Переход выполнен, не увеличиваем programCounter
+                }
+                // Иначе продолжаем обычное выполнение (programCounter будет увеличен)
+            } else {
+                std::cout << " (нет метки)";
+            }
+        }
+        else if (command == "j") {
+            // Безусловный переход - метка должна быть предыдущей командой
+            if (programCounter > 0) {
+                std::string label = commands[programCounter - 1];
+                executeJump(label);
+                std::cout << " → безусловный переход к " << label;
+                continue; // programCounter уже изменен в executeJump
+            } else {
+                std::cout << " (нет метки)";
+            }
         }
         else if (isOperator(command)) {
             // Арифметическая операция или сравнение
@@ -63,32 +100,44 @@ void OPSInterpreter::execute(const std::vector<std::string>& opsCommands) {
             }
             std::cout << " → результат в стеке";
         }
-        else if (command == ":=") {
-            // Присваивание
-            executeAssignment();
-            std::cout << " → присваивание";
+        // Проверяем, является ли это аргументом для команды перехода
+        else if (programCounter + 1 < commands.size() && 
+                 (commands[programCounter + 1] == "jf" || commands[programCounter + 1] == "j")) {
+            // Это аргумент для команды перехода, просто пропускаем
+            std::cout << " (аргумент для " << commands[programCounter + 1] << ")";
         }
-        else if (command == "jf") {
-            // Условный переход - метка должна быть предыдущей командой
-            if (programCounter > 0) {
-                std::string label = commands[programCounter - 1];
-                executeConditionalJump(label);
-                std::cout << " → условный переход к " << label;
-                continue; // programCounter уже изменен в executeConditionalJump
+        else if (isVariable(command)) {
+            // Проверяем, следует ли за переменной команда присваивания
+            bool isAssignmentTarget = false;
+            if (programCounter + 1 < commands.size() && commands[programCounter + 1] == ":=") {
+                isAssignmentTarget = true;
             }
-        }
-        else if (command == "j") {
-            // Безусловный переход - метка должна быть предыдущей командой
-            if (programCounter > 0) {
-                std::string label = commands[programCounter - 1];
-                executeJump(label);
-                std::cout << " → безусловный переход к " << label;
-                continue; // programCounter уже изменен в executeJump
+            
+            if (isAssignmentTarget) {
+                // Переменная перед := - это цель присваивания, не загружаем в стек
+                std::cout << " → цель присваивания: " << command;
+            } else {
+                // Обычная переменная - помещаем её значение в стек
+                int value = getVariable(command);
+                pushStack(value);
+                std::cout << " → стек: " << command << "=" << value;
             }
         }
         else {
-            // Возможно метка для перехода - просто продолжаем
-            std::cout << " (пропуск)";
+            // Проверяем, является ли это меткой для команды перехода
+            if (programCounter > 0 && 
+                (commands[programCounter - 1] == "jf" || commands[programCounter - 1] == "j")) {
+                // Это метка после команды перехода, пропускаем её
+                std::cout << " (аргумент для " << commands[programCounter - 1] << ")";
+            }
+            else if (command.back() == ':') {
+                // Метка в коде
+                std::cout << " (метка)";
+            }
+            else {
+                // Неизвестная команда
+                std::cout << " (неизвестная команда: " << command << ")";
+            }
         }
         
         std::cout << std::endl;
@@ -197,35 +246,25 @@ void OPSInterpreter::executeComparison(const std::string& op) {
 }
 
 void OPSInterpreter::executeAssignment() {
-    if (operandStack.size() < 2) {
+    if (operandStack.size() < 1) {
         error("Недостаточно операндов для присваивания");
     }
     
-    int value = popStack();       // Значение для присваивания
+    int value = popStack(); // Значение для присваивания
     
-    // В стеке должно остаться имя переменной или её адрес
-    // Но в нашем случае переменная уже была обработана как число в стеке
-    // Нужно найти имя переменной перед операцией присваивания
-    
-    std::string varName = "";
-    
-    // Ищем переменную перед текущей позицией (перед ":=")
-    for (int i = static_cast<int>(programCounter) - 1; i >= 0; --i) {
-        if (isVariable(commands[i]) && commands[i] != "jf" && commands[i] != "j") {
-            varName = commands[i];
-            break;
-        }
-    }
-    
-    if (!varName.empty()) {
-        variables[varName] = value;
-        // Удаляем значение переменной из стека, если оно там есть
-        if (!operandStack.empty()) {
-            popStack(); // убираем значение переменной
-        }
-    } else {
+    // Имя переменной должно быть прямо перед командой ":="
+    if (programCounter == 0) {
         error("Не найдена переменная для присваивания");
     }
+    
+    std::string varName = commands[programCounter - 1];
+    
+    if (!isVariable(varName)) {
+        error("Неверное имя переменной для присваивания: " + varName);
+    }
+    
+    variables[varName] = value;
+    std::cout << " (" << varName << " = " << value << ")";
 }
 
 void OPSInterpreter::executeJump(const std::string& label) {
@@ -246,9 +285,17 @@ void OPSInterpreter::executeConditionalJump(const std::string& label) {
     
     // jf - jump if false (переход если условие ложно)
     if (condition == 0) {
-        executeJump(label);
+        // Условие ложно - переходим к метке
+        auto it = labels.find(label);
+        if (it != labels.end()) {
+            programCounter = it->second;
+            std::cout << " (переход выполнен: условие = " << condition << ")";
+        } else {
+            error("Метка не найдена: " + label);
+        }
     } else {
-        programCounter++; // Продолжаем выполнение
+        // Условие истинно - продолжаем выполнение (programCounter будет увеличен в основном цикле)
+        std::cout << " (переход НЕ выполнен: условие = " << condition << ")";
     }
 }
 
@@ -329,4 +376,33 @@ void OPSInterpreter::reset() {
 void OPSInterpreter::error(const std::string& message) const {
     throw std::runtime_error("Ошибка интерпретатора: " + message + 
                               " (позиция " + std::to_string(programCounter) + ")");
+}
+
+void OPSInterpreter::executeRead() {
+    // Операция чтения - запрашиваем значение у пользователя
+    if (programCounter == 0) {
+        error("Не найдена переменная для чтения");
+    }
+    
+    std::string varName = commands[programCounter - 1];
+    
+    if (!isVariable(varName)) {
+        error("Неверное имя переменной для чтения: " + varName);
+    }
+    
+    std::cout << "\n  Введите значение для " << varName << ": ";
+    int value;
+    std::cin >> value;
+    variables[varName] = value;
+    std::cout << "  Прочитано: " << varName << " = " << value;
+}
+
+void OPSInterpreter::executeWrite() {
+    // Операция записи - выводим значение из стека
+    if (operandStack.empty()) {
+        error("Нет значения для вывода");
+    }
+    
+    int value = popStack();
+    std::cout << "\n  ВЫВОД: " << value;
 } 
