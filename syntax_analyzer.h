@@ -24,13 +24,15 @@ public:
     
     // Вывод сгенерированного кода
     void printOPSCode() const;
+    
+    // Доступ к сгенерированному коду ОПС
+    std::vector<std::string> opsCode;
 
 private:
     StackMachine stackMachine;
     std::unique_ptr<OPSGenerator> opsGenerator;
     std::vector<Token> tokens;
     size_t currentToken;
-    std::vector<std::string> opsCode;
     int labelCounter;
     
     // Вспомогательные методы
@@ -46,6 +48,7 @@ private:
     void parseIfStatement();
     void parseWhileStatement();
     void parseExpression();
+    void parseCondition();  // для парсинга условий в if/while
     int getPriority(const std::string& op);
     void parseSimpleExpression();  // для простых аргументов (числа, переменные)
     

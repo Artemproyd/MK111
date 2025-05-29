@@ -16,9 +16,10 @@ endif()
 # Add source files
 set(SOURCES
     syntax_analyzer.cpp
+    lexer.cpp
     stack_machine.cpp
     ops_generator.cpp
-    lexer.cpp
+    ops_interpreter.cpp
 )
 
 # Add header files

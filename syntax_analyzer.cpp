@@ -1,5 +1,6 @@
 #include "syntax_analyzer.h"
 #include "ops_generator.h"
+#include "ops_interpreter.h"
 #include <iostream>
 #include <sstream>
 #include <stdexcept>
@@ -135,7 +136,7 @@ void SyntaxAnalyzer::parseIfStatement() {
     
     currentToken++; // пропускаем '('
     
-    parseExpression(); // генерирует ОПС для условия
+    parseCondition(); // генерирует ОПС для условия
     
     // Проверяем наличие закрывающей скобки
     if (currentToken >= tokens.size() || tokens[currentToken].getType() != "RIGHT_PAREN") {
@@ -189,7 +190,7 @@ void SyntaxAnalyzer::parseWhileStatement() {
     if (currentToken < tokens.size() && tokens[currentToken].getType() == "LEFT_PAREN") {
         currentToken++; // пропускаем '('
         
-        parseExpression(); // генерирует ОПС для условия
+        parseCondition(); // генерирует ОПС для условия
         
         opsCode.push_back(endLabel + " jf"); // условный переход на конец
         
@@ -275,7 +276,8 @@ void SyntaxAnalyzer::parseExpression() {
             if (!operatorStack.empty()) {
                 operatorStack.pop(); // убираем '('
             }
-            currentToken++;
+            // НЕ продвигаем currentToken здесь - оставляем RIGHT_PAREN для верхнего уровня
+            break;
         }
         else {
             break; // выходим из выражения
@@ -287,6 +289,55 @@ void SyntaxAnalyzer::parseExpression() {
         if (operatorStack.top() != "(") {
             opsCode.push_back(operatorStack.top());
         }
+        operatorStack.pop();
+    }
+}
+
+// Новый метод для парсинга условий в if/while
+void SyntaxAnalyzer::parseCondition() {
+    std::stack<std::string> operatorStack;
+    
+    while (currentToken < tokens.size()) {
+        const Token& token = tokens[currentToken];
+        
+        if (token.getType() == "NUMBER" || token.getType() == "IDENTIFIER") {
+            opsCode.push_back(token.getValue()); // добавляем операнд
+            currentToken++;
+        }
+        else if (token.getType() == "OPERATOR") {
+            std::string op = token.getValue();
+            
+            // Преобразуем операторы в формат ОПС
+            if (op == "+") op = "+";
+            else if (op == "-") op = "-";
+            else if (op == "*") op = "*";
+            else if (op == "/") op = "/";
+            else if (op == ">") op = ">";
+            else if (op == "<") op = "<";
+            else if (op == "==") op = "==";
+            else break; // останавливаемся на других операторах
+            
+            // Простая обработка приоритета операторов
+            while (!operatorStack.empty() && 
+                   getPriority(operatorStack.top()) >= getPriority(op)) {
+                opsCode.push_back(operatorStack.top());
+                operatorStack.pop();
+            }
+            operatorStack.push(op);
+            currentToken++;
+        }
+        else if (token.getType() == "RIGHT_PAREN") {
+            // Останавливаемся на закрывающей скобке, не потребляем её
+            break;
+        }
+        else {
+            break; // выходим из выражения
+        }
+    }
+    
+    // Выгружаем оставшиеся операторы
+    while (!operatorStack.empty()) {
+        opsCode.push_back(operatorStack.top());
         operatorStack.pop();
     }
 }
@@ -398,6 +449,31 @@ void processCode(const std::string& code, const std::string& description) {
         std::cout << "  ";
         analyzer.printOPSCode();
         
+        // Выполнение ОПС интерпретатором
+        std::cout << std::string(30, '-') << std::endl;
+        std::cout << "3) ВЫПОЛНЕНИЕ ОПС (стековая машина):" << std::endl;
+        
+        try {
+            OPSInterpreter interpreter;
+            
+            // Преобразуем ОПС код в вектор строк
+            std::vector<std::string> opsCommands;
+            std::stringstream ss;
+            analyzer.printOPSCode();
+            // Получаем ОПС код из analyzer.opsCode
+            for (const auto& cmd : analyzer.opsCode) {
+                opsCommands.push_back(cmd);
+            }
+            
+            if (!opsCommands.empty()) {
+                interpreter.execute(opsCommands);
+            } else {
+                std::cout << "❌ Нет команд ОПС для выполнения" << std::endl;
+            }
+        }
+        catch (const std::exception& e) {
+            std::cout << "❌ Ошибка выполнения ОПС: " << e.what() << std::endl;
+        }
     }
     catch (const std::exception& e) {
         std::cout << "❌ ОШИБКА: " << e.what() << std::endl;
@@ -427,8 +503,8 @@ int main() {
         try {
             std::string fileContent = readFile(inputFile);
             processCode(fileContent, "Код из файла " + inputFile);
-        }
-        catch (const std::exception& e) {
+    }
+    catch (const std::exception& e) {
             std::cout << "❌ Ошибка чтения файла: " << e.what() << std::endl;
         }
     } else {
