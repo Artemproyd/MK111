@@ -107,17 +107,19 @@ void OPSInterpreter::execute(const std::vector<std::string>& opsCommands) {
             std::cout << " (аргумент для " << commands[programCounter + 1] << ")";
         }
         else if (isVariable(command)) {
-            // Проверяем, следует ли за переменной команда присваивания
+            // Проверяем, следует ли за переменной команда присваивания или ввода/вывода
             bool isAssignmentTarget = false;
-            if (programCounter + 1 < commands.size() && commands[programCounter + 1] == ":=") {
+            if (programCounter + 1 < commands.size() && 
+                (commands[programCounter + 1] == ":=" || 
+                 commands[programCounter + 1] == "r")) {
                 isAssignmentTarget = true;
             }
             
             if (isAssignmentTarget) {
-                // Переменная перед := - это цель присваивания, не загружаем в стек
-                std::cout << " → цель присваивания: " << command;
+                // Переменная перед := или r - это цель, не загружаем в стек
+                std::cout << " → цель для " << commands[programCounter + 1] << ": " << command;
             } else {
-                // Обычная переменная - помещаем её значение в стек
+                // Обычная переменная или переменная перед w - помещаем её значение в стек
                 int value = getVariable(command);
                 pushStack(value);
                 std::cout << " → стек: " << command << "=" << value;

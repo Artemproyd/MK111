@@ -1,14 +1,3 @@
-int x = 5;
-int arr = 10;
-if (x > 0) {
-    write(x);
-} else {
-    write(0);
-}
-while (x > 0) {
-    x = x - 1;
-    write(x);
-}
-if (x > 0) {
-    x = 10;
-}
+int x;
+input(x);
+output(x);
