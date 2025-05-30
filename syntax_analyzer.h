@@ -47,6 +47,7 @@ private:
     void parseAssignment();
     void parseIfStatement();
     void parseWhileStatement();
+    void parseForStatement();       // Парсинг цикла for
     void parseExpression();
     void parseCondition();  // для парсинга условий в if/while
     int getPriority(const std::string& op);
@@ -54,10 +55,8 @@ private:
     
     // Методы парсинга для массивов (согласно лекции)
     void parseReadStatement();    // read(a) → a r
-    void parseWriteStatement();   // write(S) → S w  
-    void parseMem1Statement();    // mem1(a, S) → a S m1
-    void parseMem2Statement();    // mem2(a, S, S) → a S S m2
-    void parseArrayAccess();      // M[i] → M i i
+    void parseWriteStatement();   // write(a) → a w  
+    void parseArrayAccess();      // M[i] → M i array_get
 };
 
 #endif // SYNTAX_ANALYZER_H 

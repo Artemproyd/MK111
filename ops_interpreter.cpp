@@ -62,20 +62,50 @@ void OPSInterpreter::execute(const std::vector<std::string>& opsCommands) {
             executeWrite();
             std::cout << " → запись";
         }
-        else if (command == "i") {
-            // Операция индексации массива
-            executeArrayIndex();
-            std::cout << " → индексация массива";
+        else if (command == "alloc_array") {
+            // Выделение памяти для массива
+            executeArrayAlloc();
+            std::cout << " → выделение памяти массива";
         }
-        else if (command == "m1") {
-            // Выделение памяти для 1D массива
-            executeMemAlloc1D();
-            std::cout << " → выделение памяти 1D массива";
+        else if (command == "array_get") {
+            // Получение элемента массива
+            executeArrayGet();
+            std::cout << " → получение элемента массива";
         }
-        else if (command == "m2") {
-            // Выделение памяти для 2D массива
-            executeMemAlloc2D();
+        else if (command == "array_set") {
+            // Установка элемента массива
+            executeArraySet();
+            std::cout << " → установка элемента массива";
+        }
+        else if (command == "array_read") {
+            // Чтение в элемент массива
+            executeArrayRead();
+            std::cout << " → чтение в элемент массива";
+        }
+        else if (command == "array_read_2d") {
+            // Чтение в элемент двумерного массива
+            executeArrayRead2D();
+            std::cout << " → чтение в элемент 2D массива";
+        }
+        else if (command == "alloc_array_2d") {
+            // Выделение памяти для двумерного массива
+            executeArrayAlloc2D();
             std::cout << " → выделение памяти 2D массива";
+        }
+        else if (command == "array_get_2d") {
+            // Получение элемента двумерного массива
+            executeArrayGet2D();
+            std::cout << " → получение элемента 2D массива";
+        }
+        else if (command == "array_set_2d") {
+            // Установка элемента двумерного массива
+            executeArraySet2D();
+            std::cout << " → установка элемента 2D массива";
+        }
+        else if (command == "declare") {
+            // Объявление переменной
+            executeDeclare();
+            std::cout << " → объявление переменной";
         }
         else if (command == "jf") {
             // Условный переход - метка должна быть предыдущей командой
@@ -214,7 +244,8 @@ bool OPSInterpreter::isOperator(const std::string& str) const {
 
 bool OPSInterpreter::isCommand(const std::string& str) const {
     return str == ":=" || str == "jf" || str == "j" || str == "r" || str == "w" ||
-           str == "m1" || str == "m2" || str == "i";
+           str == "alloc_array" || str == "array_get" || str == "array_set" || str == "array_read" ||
+           str == "alloc_array_2d" || str == "array_get_2d" || str == "array_set_2d" || str == "array_read_2d" || str == "declare";
 }
 
 void OPSInterpreter::executeArithmetic(const std::string& op) {
@@ -356,7 +387,7 @@ void OPSInterpreter::printState() const {
     
     std::cout << "Массивы:" << std::endl;
     if (arrays.empty()) {
-        std::cout << "  (нет массивов)" << std::endl;
+        std::cout << "  (нет одномерных массивов)" << std::endl;
     } else {
         for (const auto& array : arrays) {
             std::cout << "  " << array.first << "[" << array.second.size() << "] = {";
@@ -365,6 +396,27 @@ void OPSInterpreter::printState() const {
                 if (i < array.second.size() - 1) std::cout << ", ";
             }
             std::cout << "}" << std::endl;
+        }
+    }
+    
+    std::cout << "Двумерные массивы:" << std::endl;
+    if (arrays2D.empty()) {
+        std::cout << "  (нет двумерных массивов)" << std::endl;
+    } else {
+        for (const auto& array : arrays2D) {
+            std::cout << "  " << array.first << "[" << array.second.size() << "][" 
+                      << (array.second.empty() ? 0 : array.second[0].size()) << "] = {" << std::endl;
+            for (size_t i = 0; i < array.second.size(); ++i) {
+                std::cout << "    {";
+                for (size_t j = 0; j < array.second[i].size(); ++j) {
+                    std::cout << array.second[i][j];
+                    if (j < array.second[i].size() - 1) std::cout << ", ";
+                }
+                std::cout << "}";
+                if (i < array.second.size() - 1) std::cout << ",";
+                std::cout << std::endl;
+            }
+            std::cout << "  }" << std::endl;
         }
     }
     
@@ -399,6 +451,7 @@ void OPSInterpreter::reset() {
     }
     variables.clear();
     arrays.clear();
+    arrays2D.clear();
     labels.clear();
     commands.clear();
     programCounter = 0;
@@ -467,22 +520,53 @@ void OPSInterpreter::executeWrite() {
     std::cout << "\n  ВЫВОД: " << value;
 }
 
-void OPSInterpreter::executeArrayIndex() {
-    // Операция индексации массива: M index i → адрес M[index]
+void OPSInterpreter::executeArrayAlloc() {
+    // Формат: type arrayName size alloc_array → выделяет память для массива arrayName размером size
     if (operandStack.size() < 1) {
-        error("Недостаточно операндов для индексации массива");
+        error("Недостаточно операндов для выделения памяти");
+    }
+    
+    int size = popStack(); // размер из стека
+    
+    // Ищем имя массива в предыдущих командах (должно быть перед размером)
+    std::string arrayName;
+    for (int i = programCounter - 1; i >= 0; i--) {
+        if (isVariable(commands[i]) && !isNumber(commands[i])) {
+            arrayName = commands[i];
+            break;
+        }
+    }
+    
+    if (arrayName.empty()) {
+        error("Не найдено имя массива для выделения памяти");
+    }
+    
+    if (size < 0) {
+        error("Неверный размер массива: " + std::to_string(size));
+    }
+    
+    // Выделяем память для массива размером size+1, чтобы индекс size был валидным
+    arrays[arrayName] = std::vector<int>(size + 1, 0);
+    
+    std::cout << " (выделен массив " << arrayName << "[" << (size + 1) << "], индексы 0-" << size << ")";
+}
+
+void OPSInterpreter::executeArrayGet() {
+    // Формат: arrayName index array_get → значение arrayName[index]
+    if (operandStack.size() < 1) {
+        error("Недостаточно операндов для получения элемента массива");
     }
     
     int index = popStack();  // Индекс массива
     
-    // Имя массива должно быть перед индексом в команде
+    // Имя массива должно быть перед индексом (за 2 позиции назад)
     if (programCounter < 2) {
-        error("Не найдено имя массива для индексации");
+        error("Не найдено имя массива для получения элемента");
     }
     
-    std::string arrayName = commands[programCounter - 2];
+    std::string arrayName = commands[programCounter - 2]; // имя массива перед индексом
     
-    if (!isArrayName(arrayName)) {
+    if (!isVariable(arrayName)) {
         error("Неверное имя массива: " + arrayName);
     }
     
@@ -496,62 +580,247 @@ void OPSInterpreter::executeArrayIndex() {
     }
     
     // Помещаем значение массива в стек (для чтения)
-    // Для записи в массив будет использоваться специальная логика в executeRead
     pushStack(arrays[arrayName][index]);
     std::cout << " (" << arrayName << "[" << index << "] = " << arrays[arrayName][index] << ")";
 }
 
-void OPSInterpreter::executeMemAlloc1D() {
-    // Формат: M a m1 → выделяет память для массива M размером a
-    if (operandStack.size() < 1) {
-        error("Недостаточно операндов для выделения памяти");
+void OPSInterpreter::executeArraySet() {
+    // Формат: arrayName index value array_set → устанавливает arrayName[index] = value
+    if (operandStack.size() < 2) {
+        error("Недостаточно операндов для установки элемента массива");
     }
     
-    int size = popStack(); // размер из стека (a)
+    int value = popStack();  // Значение для установки (последнее в стеке)
+    int index = popStack();   // Индекс массива (предпоследнее в стеке)
     
-    if (programCounter < 2) {
-        error("Не найдено имя массива для выделения памяти");
+    // Имя массива должно быть за 3 позиции назад (arrayName index value array_set)
+    if (programCounter < 3) {
+        error("Не найдено имя массива для установки элемента");
     }
     
-    std::string arrayName = commands[programCounter - 2]; // имя массива M (перед размером a)
+    std::string arrayName = commands[programCounter - 3]; // имя массива перед индексом и значением
     
-    if (size < 0) {
-        error("Неверный размер массива: " + std::to_string(size));
+    if (!isVariable(arrayName)) {
+        error("Неверное имя массива: " + arrayName);
     }
     
-    // Выделяем память для массива размером size+1, чтобы индекс size был валидным
-    arrays[arrayName] = std::vector<int>(size + 1, 0);
+    // Проверяем границы массива
+    if (arrays.find(arrayName) == arrays.end()) {
+        error("Массив не инициализирован: " + arrayName);
+    }
     
-    std::cout << " (выделен массив " << arrayName << "[" << (size + 1) << "], индексы 0-" << size << ")";
+    if (index < 0 || index >= static_cast<int>(arrays[arrayName].size())) {
+        error("Индекс массива вне границ: " + std::to_string(index));
+    }
+    
+    arrays[arrayName][index] = value;
+    std::cout << " (" << arrayName << "[" << index << "] = " << value << ")";
 }
 
-void OPSInterpreter::executeMemAlloc2D() {
-    // mem2: arrayName rows cols m2 → выделяет память для 2D массива
-    if (operandStack.size() < 2) {
-        error("Недостаточно операндов для выделения памяти 2D массива");
+void OPSInterpreter::executeArrayRead() {
+    // Формат: arrayName index array_read → считывает значение в arrayName[index]
+    if (operandStack.size() < 1) {
+        error("Недостаточно операндов для чтения элемента массива");
     }
     
-    int cols = popStack();
-    int rows = popStack();
+    int index = popStack();  // Индекс массива
+    
+    // Имя массива должно быть перед индексом (за 2 позиции назад)
+    if (programCounter < 2) {
+        error("Не найдено имя массива для чтения элемента");
+    }
+    
+    std::string arrayName = commands[programCounter - 2]; // имя массива перед индексом
+    
+    if (!isVariable(arrayName)) {
+        error("Неверное имя массива: " + arrayName);
+    }
+    
+    // Проверяем границы массива
+    if (arrays.find(arrayName) == arrays.end()) {
+        error("Массив не инициализирован: " + arrayName);
+    }
+    
+    if (index < 0 || index >= static_cast<int>(arrays[arrayName].size())) {
+        error("Индекс массива вне границ: " + std::to_string(index));
+    }
+    
+    // Запрашиваем ввод от пользователя
+    std::cout << "\n  Введите значение для " << arrayName << "[" << index << "]: ";
+    int value;
+    std::cin >> value;
+    
+    // Записываем значение в массив
+    arrays[arrayName][index] = value;
+    std::cout << "  Прочитано в " << arrayName << "[" << index << "] = " << value;
+}
+
+void OPSInterpreter::executeDeclare() {
+    // Формат: M a declare → объявляет переменную M с начальным значением a
+    if (operandStack.size() < 1) {
+        error("Недостаточно операндов для объявления переменной");
+    }
+    
+    int value = popStack();  // Начальное значение переменной
     
     if (programCounter < 2) {
-        error("Не найдено имя массива для выделения памяти");
+        error("Не найдено имя переменной для объявления");
     }
     
-    std::string arrayName = commands[programCounter - 3]; // имя массива перед rows и cols
+    std::string varName = commands[programCounter - 2];
     
-    if (rows <= 0 || cols <= 0) {
-        error("Неверные размеры 2D массива: " + std::to_string(rows) + "x" + std::to_string(cols));
+    if (!isVariable(varName)) {
+        error("Неверное имя переменной для объявления: " + varName);
     }
     
-    // Выделяем память для 2D массива как 1D массив размером rows*cols
-    arrays[arrayName] = std::vector<int>(rows * cols, 0);
-    
-    std::cout << " (выделен 2D массив " << arrayName << "[" << rows << "][" << cols << "])";
+    variables[varName] = value;
+    std::cout << " (" << varName << " = " << value << ")";
 }
 
 bool OPSInterpreter::isArrayName(const std::string& name) const {
     // Проверяем, является ли имя именем массива
     return arrays.find(name) != arrays.end() || 
            (isVariable(name) && name.length() == 1 && std::isupper(name[0]));
+}
+
+void OPSInterpreter::executeArrayAlloc2D() {
+    // Формат: type arrayName rows cols alloc_array_2d → выделяет память для двумерного массива arrayName размером rows x cols
+    if (operandStack.size() < 2) {
+        error("Недостаточно операндов для выделения памяти");
+    }
+    
+    int cols = popStack(); // количество столбцов
+    int rows = popStack(); // количество строк
+    
+    // Ищем имя массива в предыдущих командах (должно быть перед количеством строк и столбцов)
+    std::string arrayName;
+    for (int i = programCounter - 2; i >= 0; i--) {
+        if (isVariable(commands[i]) && !isNumber(commands[i])) {
+            arrayName = commands[i];
+            break;
+        }
+    }
+    
+    if (arrayName.empty()) {
+        error("Не найдено имя массива для выделения памяти");
+    }
+    
+    if (rows < 0 || cols < 0) {
+        error("Неверные размеры массива: " + std::to_string(rows) + " x " + std::to_string(cols));
+    }
+    
+    // Выделяем память для двумерного массива
+    arrays2D[arrayName] = std::vector<std::vector<int>>(rows, std::vector<int>(cols, 0));
+    
+    std::cout << " (выделен двумерный массив " << arrayName << "[" << rows << "][" << cols << "])";
+}
+
+void OPSInterpreter::executeArrayGet2D() {
+    // Формат: arrayName row col array_get_2d → значение arrayName[row][col]
+    if (operandStack.size() < 2) {
+        error("Недостаточно операндов для получения элемента двумерного массива");
+    }
+    
+    int col = popStack();  // Индекс столбца
+    int row = popStack();  // Индекс строки
+    
+    // Имя массива должно быть за 3 позиции назад (arrayName row col array_get_2d)
+    if (programCounter < 3) {
+        error("Не найдено имя массива для получения элемента");
+    }
+    
+    std::string arrayName = commands[programCounter - 3]; // имя массива перед индексами
+    
+    if (!isVariable(arrayName)) {
+        error("Неверное имя массива: " + arrayName);
+    }
+    
+    // Проверяем границы массива
+    if (arrays2D.find(arrayName) == arrays2D.end()) {
+        error("Двумерный массив не инициализирован: " + arrayName);
+    }
+    
+    if (row < 0 || row >= static_cast<int>(arrays2D[arrayName].size()) ||
+        col < 0 || col >= static_cast<int>(arrays2D[arrayName][row].size())) {
+        error("Индексы массива вне границ: " + std::to_string(row) + ", " + std::to_string(col));
+    }
+    
+    // Помещаем значение массива в стек (для чтения)
+    pushStack(arrays2D[arrayName][row][col]);
+    std::cout << " (" << arrayName << "[" << row << "][" << col << "] = " << arrays2D[arrayName][row][col] << ")";
+}
+
+void OPSInterpreter::executeArraySet2D() {
+    // Формат: arrayName row col value array_set_2d → устанавливает arrayName[row][col] = value
+    if (operandStack.size() < 3) {
+        error("Недостаточно операндов для установки элемента двумерного массива");
+    }
+    
+    int value = popStack();  // Значение для установки (последнее в стеке)
+    int col = popStack();    // Индекс столбца (предпоследнее в стеке)
+    int row = popStack();    // Индекс строки (первое в стеке)
+    
+    // Имя массива должно быть за 4 позиции назад (arrayName row col value array_set_2d)
+    if (programCounter < 4) {
+        error("Не найдено имя массива для установки элемента");
+    }
+    
+    std::string arrayName = commands[programCounter - 4]; // имя массива перед всеми аргументами
+    
+    if (!isVariable(arrayName)) {
+        error("Неверное имя массива: " + arrayName);
+    }
+    
+    // Проверяем границы массива
+    if (arrays2D.find(arrayName) == arrays2D.end()) {
+        error("Двумерный массив не инициализирован: " + arrayName);
+    }
+    
+    if (row < 0 || row >= static_cast<int>(arrays2D[arrayName].size()) ||
+        col < 0 || col >= static_cast<int>(arrays2D[arrayName][row].size())) {
+        error("Индексы массива вне границ: " + std::to_string(row) + ", " + std::to_string(col));
+    }
+    
+    arrays2D[arrayName][row][col] = value;
+    std::cout << " (" << arrayName << "[" << row << "][" << col << "] = " << value << ")";
+}
+
+void OPSInterpreter::executeArrayRead2D() {
+    // Формат: arrayName row col array_read_2d → считывает значение в arrayName[row][col]
+    if (operandStack.size() < 2) {
+        error("Недостаточно операндов для чтения элемента двумерного массива");
+    }
+    
+    int col = popStack();  // Индекс столбца
+    int row = popStack();  // Индекс строки
+    
+    // Имя массива должно быть за 3 позиции назад (arrayName row col array_read_2d)
+    if (programCounter < 3) {
+        error("Не найдено имя массива для чтения элемента");
+    }
+    
+    std::string arrayName = commands[programCounter - 3]; // имя массива перед индексами
+    
+    if (!isVariable(arrayName)) {
+        error("Неверное имя массива: " + arrayName);
+    }
+    
+    // Проверяем границы массива
+    if (arrays2D.find(arrayName) == arrays2D.end()) {
+        error("Двумерный массив не инициализирован: " + arrayName);
+    }
+    
+    if (row < 0 || row >= static_cast<int>(arrays2D[arrayName].size()) ||
+        col < 0 || col >= static_cast<int>(arrays2D[arrayName][row].size())) {
+        error("Индексы массива вне границ: " + std::to_string(row) + ", " + std::to_string(col));
+    }
+    
+    // Запрашиваем ввод от пользователя
+    std::cout << "\n  Введите значение для " << arrayName << "[" << row << "][" << col << "]: ";
+    int value;
+    std::cin >> value;
+    
+    // Записываем значение в массив
+    arrays2D[arrayName][row][col] = value;
+    std::cout << "  Прочитано в " << arrayName << "[" << row << "][" << col << "] = " << value;
 } 

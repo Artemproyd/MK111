@@ -10,10 +10,7 @@ Lexer::Lexer(const std::string& input) : input(input), pos(0), line(1), column(1
 void Lexer::initKeywords() {
     keywords = {
         "int", "float", "char", "if", "else", "while", "for", 
-        "return", "void", "struct", "input", "output",
-        
-        // Ключевые слова для работы с массивами согласно лекции
-        "read", "write", "mem1", "mem2"
+        "return", "void", "struct", "input", "output", "read", "write"
     };
 }
 

@@ -70,24 +70,18 @@ void SyntaxAnalyzer::parseStatement() {
     }
     
     if (token.getType() == "KEYWORD") {
-        if (token.getValue() == "int") {
+        if (token.getValue() == "int" || token.getValue() == "float" || token.getValue() == "char") {
             parseDeclaration();
         } else if (token.getValue() == "if") {
             parseIfStatement();
         } else if (token.getValue() == "while") {
             parseWhileStatement();
-        } else if (token.getValue() == "read") {
+        } else if (token.getValue() == "for") {
+            parseForStatement();
+        } else if (token.getValue() == "read" || token.getValue() == "input") {
             parseReadStatement();
-        } else if (token.getValue() == "write") {
+        } else if (token.getValue() == "write" || token.getValue() == "output") {
             parseWriteStatement();
-        } else if (token.getValue() == "input") {
-            parseReadStatement(); // input() = read()
-        } else if (token.getValue() == "output") {
-            parseWriteStatement(); // output() = write()
-        } else if (token.getValue() == "mem1") {
-            parseMem1Statement();
-        } else if (token.getValue() == "mem2") {
-            parseMem2Statement();
         } else {
             // Неизвестное ключевое слово - пропускаем
             currentToken++;
@@ -101,8 +95,9 @@ void SyntaxAnalyzer::parseStatement() {
 }
 
 void SyntaxAnalyzer::parseDeclaration() {
-    // int x = value; ИЛИ int M[size];
-    currentToken++; // пропускаем 'int'
+    // Типизированное объявление: int x = value; ИЛИ int M[size]; ИЛИ float A[10];
+    std::string type = tokens[currentToken].getValue(); // int, float, char
+    currentToken++; // пропускаем тип
     
     if (currentToken < tokens.size() && tokens[currentToken].getType() == "IDENTIFIER") {
         std::string varName = tokens[currentToken].getValue();
@@ -113,25 +108,71 @@ void SyntaxAnalyzer::parseDeclaration() {
             currentToken++; // пропускаем '['
             
             // Парсим размер массива
-            parseExpression(); // генерирует ОПС для размера
-            opsCode.push_back(varName); // имя массива
-            opsCode.push_back("m1"); // команда выделения памяти
-            
-            if (currentToken >= tokens.size() || tokens[currentToken].getType() != "RIGHT_BRACKET") {
-                if (currentToken < tokens.size()) {
-                    error("Expected ']' after array size", tokens[currentToken]);
-                } else {
-                    throw std::runtime_error("Unexpected end of input - missing ']'");
+            if (currentToken < tokens.size() && tokens[currentToken].getType() == "NUMBER") {
+                std::string size1 = tokens[currentToken].getValue();
+                currentToken++;
+                
+                if (currentToken >= tokens.size() || tokens[currentToken].getType() != "RIGHT_BRACKET") {
+                    if (currentToken < tokens.size()) {
+                        error("Expected ']' after array size", tokens[currentToken]);
+                    } else {
+                        throw std::runtime_error("Unexpected end of input - missing ']'");
+                    }
                 }
+                currentToken++; // пропускаем ']'
+                
+                // Проверяем на двумерный массив M[size1][size2]
+                if (currentToken < tokens.size() && tokens[currentToken].getType() == "LEFT_BRACKET") {
+                    currentToken++; // пропускаем '['
+                    
+                    if (currentToken < tokens.size() && tokens[currentToken].getType() == "NUMBER") {
+                        std::string size2 = tokens[currentToken].getValue();
+                        currentToken++;
+                        
+                        // Генерируем ОПС для объявления двумерного массива
+                        // Формат: тип имя_массива строки столбцы alloc_array_2d
+                        opsCode.push_back(type);        // тип массива (int/float/char)
+                        opsCode.push_back(varName);     // имя массива
+                        opsCode.push_back(size1);       // количество строк
+                        opsCode.push_back(size2);       // количество столбцов
+                        opsCode.push_back("alloc_array_2d"); // команда выделения памяти 2D
+                        
+                        if (currentToken >= tokens.size() || tokens[currentToken].getType() != "RIGHT_BRACKET") {
+                            if (currentToken < tokens.size()) {
+                                error("Expected ']' after second array dimension", tokens[currentToken]);
+                            } else {
+                                throw std::runtime_error("Unexpected end of input - missing second ']'");
+                            }
+                        }
+                        currentToken++; // пропускаем ']'
+                    } else {
+                        error("Expected array size after second '['", tokens[currentToken]);
+                    }
+                } else {
+                    // Одномерный массив
+                    // Генерируем ОПС для объявления типизированного массива
+                    // Формат: тип имя_массива размер alloc_array
+                    opsCode.push_back(type);        // тип массива (int/float/char)
+                    opsCode.push_back(varName);     // имя массива
+                    opsCode.push_back(size1);       // размер массива
+                    opsCode.push_back("alloc_array"); // команда выделения памяти
+                }
+            } else {
+                error("Expected array size after '['", tokens[currentToken]);
             }
-            currentToken++; // пропускаем ']'
         }
         else if (currentToken < tokens.size() && tokens[currentToken].getValue() == "=") {
-            // Обычное объявление с инициализацией
+            // Обычное объявление с инициализацией: int x = 5;
             currentToken++; // пропускаем '='
             parseExpression(); // генерирует ОПС для выражения (значение уже в стеке)
             opsCode.push_back(varName); // добавляем имя переменной
             opsCode.push_back(":="); // добавляем операцию присваивания
+        } else {
+            // Простое объявление без инициализации: int x;
+            // В ОПС это может не генерировать команд, или генерировать команду объявления
+            opsCode.push_back(type);     // тип переменной
+            opsCode.push_back(varName);  // имя переменной
+            opsCode.push_back("declare"); // команда объявления
         }
         
         // пропускаем ';'
@@ -146,11 +187,14 @@ void SyntaxAnalyzer::parseAssignment() {
     std::string varName = tokens[currentToken].getValue();
     currentToken++;
     
-    // Проверяем на доступ к массиву M[i]
+    // Проверяем на доступ к массиву M[i] или M[i][j]
     if (currentToken < tokens.size() && tokens[currentToken].getType() == "LEFT_BRACKET") {
         currentToken++; // пропускаем '['
-        parseSimpleExpression(); // парсим индекс (используем простое выражение)
-        opsCode.push_back("i"); // операция индексирования
+        
+        // Сначала добавляем имя массива
+        opsCode.push_back(varName); // имя массива идет ПЕРВЫМ
+        
+        parseExpression(); // парсим первый индекс (добавляется в стек)
         
         if (currentToken >= tokens.size() || tokens[currentToken].getType() != "RIGHT_BRACKET") {
             if (currentToken < tokens.size()) {
@@ -160,13 +204,43 @@ void SyntaxAnalyzer::parseAssignment() {
             }
         }
         currentToken++; // пропускаем ']'
-    }
-    
-    if (currentToken < tokens.size() && tokens[currentToken].getValue() == "=") {
-        currentToken++; // пропускаем '='
-        parseExpression(); // генерирует ОПС для выражения (значение в стеке)
-        opsCode.push_back(varName); // добавляем имя переменной ПОСЛЕ значения
-        opsCode.push_back(":="); // добавляем присваивание
+        
+        // Проверяем на второй индекс для двумерного массива M[i][j]
+        if (currentToken < tokens.size() && tokens[currentToken].getType() == "LEFT_BRACKET") {
+            currentToken++; // пропускаем '['
+            
+            parseExpression(); // парсим второй индекс (добавляется в стек)
+            
+            if (currentToken >= tokens.size() || tokens[currentToken].getType() != "RIGHT_BRACKET") {
+                if (currentToken < tokens.size()) {
+                    error("Expected ']' after second array index", tokens[currentToken]);
+                } else {
+                    throw std::runtime_error("Unexpected end of input - missing second ']'");
+                }
+            }
+            currentToken++; // пропускаем ']'
+            
+            if (currentToken < tokens.size() && tokens[currentToken].getValue() == "=") {
+                currentToken++; // пропускаем '='
+                parseExpression(); // генерирует ОПС для выражения (значение в стеке)
+                opsCode.push_back("array_set_2d"); // операция установки элемента 2D массива
+            }
+        } else {
+            // Одномерный массив M[i] = value
+            if (currentToken < tokens.size() && tokens[currentToken].getValue() == "=") {
+                currentToken++; // пропускаем '='
+                parseExpression(); // генерирует ОПС для выражения (значение в стеке)
+                opsCode.push_back("array_set"); // операция установки элемента массива
+            }
+        }
+    } else {
+        // Обычное присваивание переменной
+        if (currentToken < tokens.size() && tokens[currentToken].getValue() == "=") {
+            currentToken++; // пропускаем '='
+            parseExpression(); // генерирует ОПС для выражения (значение в стеке)
+            opsCode.push_back(varName); // добавляем имя переменной ПОСЛЕ значения
+            opsCode.push_back(":="); // добавляем присваивание
+        }
     }
     
     // пропускаем ';'
@@ -339,16 +413,39 @@ void SyntaxAnalyzer::parseExpression() {
             if (currentToken < tokens.size() && tokens[currentToken].getType() == "LEFT_BRACKET") {
                 currentToken++; // пропускаем '['
                 parseExpression(); // парсим индекс
-                opsCode.push_back("i"); // операция индексирования согласно лекции
                 
-                if (currentToken >= tokens.size() || tokens[currentToken].getType() != "RIGHT_BRACKET") {
-                    if (currentToken < tokens.size()) {
-                        error("Expected ']' after array index", tokens[currentToken]);
+                // Проверяем на второй индекс для двумерного массива M[i][j]
+                if (currentToken < tokens.size() && tokens[currentToken].getType() == "RIGHT_BRACKET") {
+                    currentToken++; // пропускаем ']'
+                    
+                    if (currentToken < tokens.size() && tokens[currentToken].getType() == "LEFT_BRACKET") {
+                        currentToken++; // пропускаем '['
+                        parseExpression(); // парсим второй индекс
+                        opsCode.push_back("array_get_2d"); // операция получения элемента 2D массива
+                        
+                        if (currentToken >= tokens.size() || tokens[currentToken].getType() != "RIGHT_BRACKET") {
+                            if (currentToken < tokens.size()) {
+                                error("Expected ']' after second array index", tokens[currentToken]);
+                            } else {
+                                throw std::runtime_error("Unexpected end of input - missing second ']'");
+                            }
+                        }
+                        currentToken++; // пропускаем ']'
                     } else {
-                        throw std::runtime_error("Unexpected end of input - missing ']'");
+                        // Одномерный массив
+                        opsCode.push_back("array_get"); // операция получения элемента массива
                     }
+                } else {
+                    if (currentToken >= tokens.size() || tokens[currentToken].getType() != "RIGHT_BRACKET") {
+                        if (currentToken < tokens.size()) {
+                            error("Expected ']' after array index", tokens[currentToken]);
+                        } else {
+                            throw std::runtime_error("Unexpected end of input - missing ']'");
+                        }
+                    }
+                    currentToken++; // пропускаем ']'
+                    opsCode.push_back("array_get"); // операция получения элемента массива
                 }
-                currentToken++; // пропускаем ']'
             }
         }
         else if (token.getType() == "OPERATOR") {
@@ -650,7 +747,7 @@ int main() {
 // ============== НОВЫЕ МЕТОДЫ ДЛЯ МАССИВОВ (согласно лекции) ==============
 
 void SyntaxAnalyzer::parseReadStatement() {
-    // read(a) → a r
+    // read(a) → a r  ИЛИ  read(M[i]) → M i array_read  ИЛИ  read(M[i][j]) → M i j array_read_2d
     currentToken++; // пропускаем 'read'
     
     // Ожидаем '('
@@ -673,14 +770,13 @@ void SyntaxAnalyzer::parseReadStatement() {
         error("Expected identifier in read statement", varToken);
     }
     
-    opsCode.push_back(varToken.getValue()); // добавляем переменную
+    opsCode.push_back(varToken.getValue()); // добавляем переменную/массив
     currentToken++;
     
-    // Проверяем на доступ к массиву M[i]
+    // Проверяем на доступ к массиву M[i] или M[i][j]
     if (currentToken < tokens.size() && tokens[currentToken].getType() == "LEFT_BRACKET") {
         currentToken++; // пропускаем '['
-        parseExpression(); // парсим индекс
-        opsCode.push_back("i"); // операция индексирования
+        parseExpression(); // парсим первый индекс
         
         if (currentToken >= tokens.size() || tokens[currentToken].getType() != "RIGHT_BRACKET") {
             if (currentToken < tokens.size()) {
@@ -690,9 +786,31 @@ void SyntaxAnalyzer::parseReadStatement() {
             }
         }
         currentToken++; // пропускаем ']'
+        
+        // Проверяем на второй индекс для двумерного массива M[i][j]
+        if (currentToken < tokens.size() && tokens[currentToken].getType() == "LEFT_BRACKET") {
+            currentToken++; // пропускаем '['
+            parseExpression(); // парсим второй индекс
+            
+            if (currentToken >= tokens.size() || tokens[currentToken].getType() != "RIGHT_BRACKET") {
+                if (currentToken < tokens.size()) {
+                    error("Expected ']' after second array index", tokens[currentToken]);
+                } else {
+                    throw std::runtime_error("Unexpected end of input - missing second ']'");
+                }
+            }
+            currentToken++; // пропускаем ']'
+            
+            // Команда для чтения в двумерный массив (пока такой нет в спецификации, используем array_read_2d)
+            opsCode.push_back("array_read_2d"); // операция чтения в элемент 2D массива
+        } else {
+            // Одномерный массив M[i]
+            opsCode.push_back("array_read"); // операция чтения в элемент массива
+        }
+    } else {
+        // Обычная переменная
+        opsCode.push_back("r"); // операция чтения для обычной переменной
     }
-    
-    opsCode.push_back("r"); // операция чтения
     
     // Ожидаем ')'
     if (currentToken >= tokens.size() || tokens[currentToken].getType() != "RIGHT_PAREN") {
@@ -744,131 +862,6 @@ void SyntaxAnalyzer::parseWriteStatement() {
     }
 }
 
-void SyntaxAnalyzer::parseMem1Statement() {
-    // mem1(a, S) → a S m1
-    currentToken++; // пропускаем 'mem1'
-    
-    // Ожидаем '('
-    if (currentToken >= tokens.size() || tokens[currentToken].getType() != "LEFT_PAREN") {
-        if (currentToken < tokens.size()) {
-            error("Expected '(' after 'mem1'", tokens[currentToken]);
-        } else {
-            throw std::runtime_error("Unexpected end of input after 'mem1'");
-        }
-    }
-    currentToken++; // пропускаем '('
-    
-    // Первый аргумент - имя массива
-    if (currentToken >= tokens.size() || tokens[currentToken].getType() != "IDENTIFIER") {
-        if (currentToken < tokens.size()) {
-            error("Expected array name in mem1", tokens[currentToken]);
-        } else {
-            throw std::runtime_error("Expected array name after 'mem1('");
-        }
-    }
-    
-    opsCode.push_back(tokens[currentToken].getValue()); // имя массива
-    currentToken++;
-    
-    // Ожидаем ','
-    if (currentToken >= tokens.size() || tokens[currentToken].getType() != "COMMA") {
-        if (currentToken < tokens.size()) {
-            error("Expected ',' after array name in mem1", tokens[currentToken]);
-        } else {
-            throw std::runtime_error("Unexpected end of input - missing ','");
-        }
-    }
-    currentToken++; // пропускаем ','
-    
-    // Второй аргумент - размер массива
-    parseSimpleExpression(); // генерирует ОПС для размера
-    opsCode.push_back("m1"); // операция выделения памяти
-    
-    // Ожидаем ')'
-    if (currentToken >= tokens.size() || tokens[currentToken].getType() != "RIGHT_PAREN") {
-        if (currentToken < tokens.size()) {
-            error("Expected ')' after mem1 arguments", tokens[currentToken]);
-        } else {
-            throw std::runtime_error("Unexpected end of input - missing ')'");
-        }
-    }
-    currentToken++; // пропускаем ')'
-    
-    // Ожидаем ';'
-    if (currentToken < tokens.size() && tokens[currentToken].getType() == "SEMICOLON") {
-        currentToken++;
-    }
-}
-
-void SyntaxAnalyzer::parseMem2Statement() {
-    // mem2(a, S, S) → a S S m2
-    currentToken++; // пропускаем 'mem2'
-    
-    // Ожидаем '('
-    if (currentToken >= tokens.size() || tokens[currentToken].getType() != "LEFT_PAREN") {
-        if (currentToken < tokens.size()) {
-            error("Expected '(' after 'mem2'", tokens[currentToken]);
-        } else {
-            throw std::runtime_error("Unexpected end of input after 'mem2'");
-        }
-    }
-    currentToken++; // пропускаем '('
-    
-    // Первый аргумент - имя массива
-    if (currentToken >= tokens.size() || tokens[currentToken].getType() != "IDENTIFIER") {
-        if (currentToken < tokens.size()) {
-            error("Expected array name in mem2", tokens[currentToken]);
-        } else {
-            throw std::runtime_error("Expected array name after 'mem2('");
-        }
-    }
-    
-    opsCode.push_back(tokens[currentToken].getValue()); // имя массива
-    currentToken++;
-    
-    // Ожидаем ','
-    if (currentToken >= tokens.size() || tokens[currentToken].getType() != "COMMA") {
-        if (currentToken < tokens.size()) {
-            error("Expected ',' after array name in mem2", tokens[currentToken]);
-        } else {
-            throw std::runtime_error("Unexpected end of input - missing ','");
-        }
-    }
-    currentToken++; // пропускаем ','
-    
-    // Второй аргумент - количество строк
-    parseSimpleExpression(); // генерирует ОПС для количества строк
-    
-    // Ожидаем ','
-    if (currentToken >= tokens.size() || tokens[currentToken].getType() != "COMMA") {
-        if (currentToken < tokens.size()) {
-            error("Expected ',' after rows count in mem2", tokens[currentToken]);
-        } else {
-            throw std::runtime_error("Unexpected end of input - missing second ','");
-        }
-    }
-    currentToken++; // пропускаем ','
-    
-    // Третий аргумент - количество элементов в строке
-    parseSimpleExpression(); // генерирует ОПС для количества элементов
-    opsCode.push_back("m2"); // операция выделения памяти для 2D массива
-    
-    // Ожидаем ')'
-    if (currentToken >= tokens.size() || tokens[currentToken].getType() != "RIGHT_PAREN") {
-        if (currentToken < tokens.size()) {
-            error("Expected ')' after mem2 arguments", tokens[currentToken]);
-        } else {
-            throw std::runtime_error("Unexpected end of input - missing ')'");
-        }
-    }
-    currentToken++; // пропускаем ')'
-    
-    // Ожидаем ';'
-    if (currentToken < tokens.size() && tokens[currentToken].getType() == "SEMICOLON") {
-        currentToken++;
-    }
-}
-
 void SyntaxAnalyzer::parseArrayAccess() {
     // M[i] → M i i  (используется в parseExpression)
     // Этот метод будет вызываться из parseExpression при обнаружении '['
@@ -892,4 +885,105 @@ void SyntaxAnalyzer::parseSimpleExpression() {
     }
 }
 
-// ============== КОНЕЦ НОВЫХ МЕТОДОВ ============== 
+void SyntaxAnalyzer::parseForStatement() {
+    // for (init; condition; increment) { body }
+    // Трансформируется в: init; while(condition) { body; increment; }
+    currentToken++; // пропускаем 'for'
+    
+    // Ожидаем '('
+    if (currentToken >= tokens.size() || tokens[currentToken].getType() != "LEFT_PAREN") {
+        if (currentToken < tokens.size()) {
+            error("Expected '(' after 'for'", tokens[currentToken]);
+        } else {
+            throw std::runtime_error("Unexpected end of input after 'for'");
+        }
+    }
+    currentToken++; // пропускаем '('
+    
+    // 1. Парсим инициализацию (может быть объявление или присваивание)
+    if (currentToken < tokens.size() && tokens[currentToken].getType() == "KEYWORD") {
+        parseDeclaration(); // int i = 0;
+    } else if (currentToken < tokens.size() && tokens[currentToken].getType() == "IDENTIFIER") {
+        parseAssignment(); // i = 0;
+    } else {
+        // Пропускаем ';' если инициализация пустая
+        if (currentToken < tokens.size() && tokens[currentToken].getType() == "SEMICOLON") {
+            currentToken++;
+        }
+    }
+    
+    // Проверяем ';' после инициализации (если не была обработана в parseDeclaration/parseAssignment)
+    if (currentToken < tokens.size() && tokens[currentToken].getType() == "SEMICOLON") {
+        currentToken++; // пропускаем ';'
+    }
+    
+    // Генерируем метки для цикла
+    std::string startLabel = "m" + std::to_string(labelCounter++);
+    std::string endLabel = "m" + std::to_string(labelCounter++);
+    std::string incrementLabel = "m" + std::to_string(labelCounter++);
+    
+    opsCode.push_back(startLabel + ":"); // метка начала цикла
+    
+    // 2. Парсим условие
+    parseCondition(); // генерирует ОПС для условия
+    
+    opsCode.push_back(endLabel); // метка для условного перехода
+    opsCode.push_back("jf");     // команда условного перехода на конец
+    
+    // Пропускаем ';' после условия
+    if (currentToken < tokens.size() && tokens[currentToken].getType() == "SEMICOLON") {
+        currentToken++; // пропускаем ';'
+    }
+    
+    // 3. Сохраняем инкремент для обработки после тела цикла
+    size_t incrementStart = currentToken;
+    
+    // Пропускаем инкремент, чтобы добраться до тела цикла
+    int parenCount = 0;
+    while (currentToken < tokens.size()) {
+        if (tokens[currentToken].getType() == "LEFT_PAREN") parenCount++;
+        if (tokens[currentToken].getType() == "RIGHT_PAREN") {
+            if (parenCount == 0) break;
+            parenCount--;
+        }
+        currentToken++;
+    }
+    
+    size_t incrementEnd = currentToken;
+    
+    // Пропускаем ')'
+    if (currentToken < tokens.size() && tokens[currentToken].getType() == "RIGHT_PAREN") {
+        currentToken++; // пропускаем ')'
+    }
+    
+    // 4. Парсим тело цикла
+    if (currentToken < tokens.size() && tokens[currentToken].getType() == "LEFT_BRACE") {
+        currentToken++; // пропускаем '{'
+        
+        // парсим тело for
+        while (currentToken < tokens.size() && tokens[currentToken].getType() != "RIGHT_BRACE") {
+            parseStatement();
+        }
+        
+        if (currentToken < tokens.size() && tokens[currentToken].getType() == "RIGHT_BRACE") {
+            currentToken++; // пропускаем '}'
+        }
+    }
+    
+    // 5. Обрабатываем инкремент
+    size_t savedToken = currentToken;
+    currentToken = incrementStart;
+    
+    if (currentToken < incrementEnd) {
+        parseAssignment(); // парсим инкремент как присваивание
+    }
+    
+    currentToken = savedToken;
+    
+    // 6. Генерируем переход на начало цикла
+    opsCode.push_back(startLabel); // метка для безусловного перехода
+    opsCode.push_back("j");        // команда безусловного перехода на начало
+    opsCode.push_back(endLabel + ":"); // метка конца цикла
+}
+
+// ============== КОНЕЦ НОВЫХ МЕТОДОВ ==============

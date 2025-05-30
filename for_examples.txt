@@ -1,0 +1,16 @@
+int result = 0;
+for (int i = 0; i < 5; i = i + 1) {
+    result = result + i;
+}
+write(result);
+
+int factorial = 1;
+for (int j = 1; j < 5; j = j + 1) {
+    factorial = factorial * j;
+}
+write(factorial);
+
+int countdown = 10;
+for (int k = 10; k > 0; k = k - 1) {
+    write(k);
+} 

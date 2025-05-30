@@ -113,3 +113,36 @@ if (x > 5) {
 ✅ Анализ завершен!
 
 Нажмите Enter для выхода...
+
+// Пример 1: Простая арифметика
+int a = 10;
+int b = 5;
+int result = a + b * 2;
+write(result);
+
+// Пример 2: Условный оператор
+int x = 7;
+if (x > 5) {
+    write(1);
+} else {
+    write(0);
+}
+
+// Пример 3: Цикл while
+int counter = 3;
+while (counter > 0) {
+    write(counter);
+    counter = counter - 1;
+}
+
+// Пример 4: Работа с массивами
+int numbers[3];
+numbers[0] = 10;
+numbers[1] = 20;
+numbers[2] = 30;
+write(numbers[1]);
+
+// Пример 5: Чтение и вывод
+int value;
+read(value);
+write(value);

@@ -30,7 +30,8 @@ public:
 private:
     std::stack<int> operandStack;                    // Стек операндов
     std::unordered_map<std::string, int> variables;  // Таблица переменных
-    std::unordered_map<std::string, std::vector<int>> arrays; // Таблица массивов
+    std::unordered_map<std::string, std::vector<int>> arrays; // Таблица одномерных массивов
+    std::unordered_map<std::string, std::vector<std::vector<int>>> arrays2D; // Таблица двумерных массивов
     std::unordered_map<std::string, size_t> labels;  // Таблица меток
     std::vector<std::string> commands;               // Команды ОПС
     size_t programCounter;                           // Счетчик команд
@@ -49,9 +50,15 @@ private:
     void executeAssignment();                        // Присваивание (:=)
     void executeRead();                              // Чтение (r)
     void executeWrite();                             // Запись (w)
-    void executeArrayIndex();                        // Индексация массива (i)
-    void executeMemAlloc1D();                        // Выделение памяти 1D массива (m1)
-    void executeMemAlloc2D();                        // Выделение памяти 2D массива (m2)
+    void executeArrayAlloc();                        // Выделение памяти массива (alloc_array)
+    void executeArrayGet();                          // Получение элемента массива (array_get)
+    void executeArraySet();                          // Установка элемента массива (array_set)
+    void executeArrayRead();                         // Чтение в элемент массива (array_read)
+    void executeArrayRead2D();                       // Чтение в элемент 2D массива (array_read_2d)
+    void executeArrayAlloc2D();                      // Выделение памяти 2D массива (alloc_array_2d)
+    void executeArrayGet2D();                        // Получение элемента 2D массива (array_get_2d)
+    void executeArraySet2D();                        // Установка элемента 2D массива (array_set_2d)
+    void executeDeclare();                           // Объявление переменной (declare)
     void executeJump(const std::string& label);      // Безусловный переход (j)
     void executeConditionalJump(const std::string& label); // Условный переход (jf)
     

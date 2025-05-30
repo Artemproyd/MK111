@@ -1,5 +1,6 @@
-int a;
-input(a);
-mem1(M, a);
-input(M[a]);
-output(M[a] * a);
+int matrix[3];
+
+for (int i = 0; i < 2; i = i + 1) {
+    read(matrix[i]);
+}
+
