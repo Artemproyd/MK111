@@ -30,6 +30,7 @@ public:
 private:
     std::stack<int> operandStack;                    // Стек операндов
     std::unordered_map<std::string, int> variables;  // Таблица переменных
+    std::unordered_map<std::string, std::vector<int>> arrays; // Таблица массивов
     std::unordered_map<std::string, size_t> labels;  // Таблица меток
     std::vector<std::string> commands;               // Команды ОПС
     size_t programCounter;                           // Счетчик команд
@@ -48,6 +49,9 @@ private:
     void executeAssignment();                        // Присваивание (:=)
     void executeRead();                              // Чтение (r)
     void executeWrite();                             // Запись (w)
+    void executeArrayIndex();                        // Индексация массива (i)
+    void executeMemAlloc1D();                        // Выделение памяти 1D массива (m1)
+    void executeMemAlloc2D();                        // Выделение памяти 2D массива (m2)
     void executeJump(const std::string& label);      // Безусловный переход (j)
     void executeConditionalJump(const std::string& label); // Условный переход (jf)
     
@@ -55,6 +59,9 @@ private:
     int popStack();                                  // Извлечь значение из стека
     void pushStack(int value);                       // Поместить значение в стек
     void error(const std::string& message) const;    // Обработка ошибок
+    
+    // Вспомогательные методы для массивов
+    bool isArrayName(const std::string& name) const; // Проверка на имя массива
 };
 
 #endif // OPS_INTERPRETER_H 

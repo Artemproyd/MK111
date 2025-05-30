@@ -1,3 +1,5 @@
-int x;
-input(x);
-output(x);
+int a;
+input(a);
+mem1(M, a);
+input(M[a]);
+output(M[a] * a);

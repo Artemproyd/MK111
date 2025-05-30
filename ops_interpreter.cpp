@@ -62,6 +62,21 @@ void OPSInterpreter::execute(const std::vector<std::string>& opsCommands) {
             executeWrite();
             std::cout << " → запись";
         }
+        else if (command == "i") {
+            // Операция индексации массива
+            executeArrayIndex();
+            std::cout << " → индексация массива";
+        }
+        else if (command == "m1") {
+            // Выделение памяти для 1D массива
+            executeMemAlloc1D();
+            std::cout << " → выделение памяти 1D массива";
+        }
+        else if (command == "m2") {
+            // Выделение памяти для 2D массива
+            executeMemAlloc2D();
+            std::cout << " → выделение памяти 2D массива";
+        }
         else if (command == "jf") {
             // Условный переход - метка должна быть предыдущей командой
             if (programCounter > 0) {
@@ -339,6 +354,20 @@ void OPSInterpreter::printState() const {
         }
     }
     
+    std::cout << "Массивы:" << std::endl;
+    if (arrays.empty()) {
+        std::cout << "  (нет массивов)" << std::endl;
+    } else {
+        for (const auto& array : arrays) {
+            std::cout << "  " << array.first << "[" << array.second.size() << "] = {";
+            for (size_t i = 0; i < array.second.size(); ++i) {
+                std::cout << array.second[i];
+                if (i < array.second.size() - 1) std::cout << ", ";
+            }
+            std::cout << "}" << std::endl;
+        }
+    }
+    
     std::cout << "Стек операндов:" << std::endl;
     if (operandStack.empty()) {
         std::cout << "  (пустой)" << std::endl;
@@ -369,6 +398,7 @@ void OPSInterpreter::reset() {
         operandStack.pop();
     }
     variables.clear();
+    arrays.clear();
     labels.clear();
     commands.clear();
     programCounter = 0;
@@ -382,21 +412,49 @@ void OPSInterpreter::error(const std::string& message) const {
 
 void OPSInterpreter::executeRead() {
     // Операция чтения - запрашиваем значение у пользователя
-    if (programCounter == 0) {
-        error("Не найдена переменная для чтения");
-    }
-    
-    std::string varName = commands[programCounter - 1];
-    
-    if (!isVariable(varName)) {
-        error("Неверное имя переменной для чтения: " + varName);
-    }
-    
-    std::cout << "\n  Введите значение для " << varName << ": ";
+    std::cout << "\n  Введите значение: ";
     int value;
     std::cin >> value;
-    variables[varName] = value;
-    std::cout << "  Прочитано: " << varName << " = " << value;
+    
+    // Проверяем, была ли перед командой r операция индексации i
+    if (programCounter >= 1 && commands[programCounter - 1] == "i") {
+        // Записываем в массив M[index]
+        // Нужно найти имя массива и индекс в предыдущих командах
+        if (programCounter >= 3) {
+            std::string arrayName = commands[programCounter - 3]; // M
+            std::string indexVar = commands[programCounter - 2];   // a
+            
+            int index = getVariable(indexVar);
+            
+            if (arrays.find(arrayName) == arrays.end()) {
+                // Автоматически создаем массив если его нет
+                arrays[arrayName] = std::vector<int>(10, 0); // размер по умолчанию
+            }
+            
+            if (index >= 0 && index < static_cast<int>(arrays[arrayName].size())) {
+                arrays[arrayName][index] = value;
+                std::cout << "  Прочитано в " << arrayName << "[" << index << "] = " << value;
+            } else {
+                error("Индекс массива вне границ при записи: " + std::to_string(index));
+            }
+        } else {
+            error("Недостаточно информации для записи в массив");
+        }
+    } else {
+        // Обычная запись в переменную
+        if (programCounter == 0) {
+            error("Не найдена переменная для чтения");
+        }
+        
+        std::string varName = commands[programCounter - 1];
+        
+        if (!isVariable(varName)) {
+            error("Неверное имя переменной для чтения: " + varName);
+        }
+        
+        variables[varName] = value;
+        std::cout << "  Прочитано: " << varName << " = " << value;
+    }
 }
 
 void OPSInterpreter::executeWrite() {
@@ -407,4 +465,93 @@ void OPSInterpreter::executeWrite() {
     
     int value = popStack();
     std::cout << "\n  ВЫВОД: " << value;
+}
+
+void OPSInterpreter::executeArrayIndex() {
+    // Операция индексации массива: M index i → адрес M[index]
+    if (operandStack.size() < 1) {
+        error("Недостаточно операндов для индексации массива");
+    }
+    
+    int index = popStack();  // Индекс массива
+    
+    // Имя массива должно быть перед индексом в команде
+    if (programCounter < 2) {
+        error("Не найдено имя массива для индексации");
+    }
+    
+    std::string arrayName = commands[programCounter - 2];
+    
+    if (!isArrayName(arrayName)) {
+        error("Неверное имя массива: " + arrayName);
+    }
+    
+    // Проверяем границы массива
+    if (arrays.find(arrayName) == arrays.end()) {
+        error("Массив не инициализирован: " + arrayName);
+    }
+    
+    if (index < 0 || index >= static_cast<int>(arrays[arrayName].size())) {
+        error("Индекс массива вне границ: " + std::to_string(index));
+    }
+    
+    // Помещаем значение массива в стек (для чтения)
+    // Для записи в массив будет использоваться специальная логика в executeRead
+    pushStack(arrays[arrayName][index]);
+    std::cout << " (" << arrayName << "[" << index << "] = " << arrays[arrayName][index] << ")";
+}
+
+void OPSInterpreter::executeMemAlloc1D() {
+    // Формат: M a m1 → выделяет память для массива M размером a
+    if (operandStack.size() < 1) {
+        error("Недостаточно операндов для выделения памяти");
+    }
+    
+    int size = popStack(); // размер из стека (a)
+    
+    if (programCounter < 2) {
+        error("Не найдено имя массива для выделения памяти");
+    }
+    
+    std::string arrayName = commands[programCounter - 2]; // имя массива M (перед размером a)
+    
+    if (size < 0) {
+        error("Неверный размер массива: " + std::to_string(size));
+    }
+    
+    // Выделяем память для массива размером size+1, чтобы индекс size был валидным
+    arrays[arrayName] = std::vector<int>(size + 1, 0);
+    
+    std::cout << " (выделен массив " << arrayName << "[" << (size + 1) << "], индексы 0-" << size << ")";
+}
+
+void OPSInterpreter::executeMemAlloc2D() {
+    // mem2: arrayName rows cols m2 → выделяет память для 2D массива
+    if (operandStack.size() < 2) {
+        error("Недостаточно операндов для выделения памяти 2D массива");
+    }
+    
+    int cols = popStack();
+    int rows = popStack();
+    
+    if (programCounter < 2) {
+        error("Не найдено имя массива для выделения памяти");
+    }
+    
+    std::string arrayName = commands[programCounter - 3]; // имя массива перед rows и cols
+    
+    if (rows <= 0 || cols <= 0) {
+        error("Неверные размеры 2D массива: " + std::to_string(rows) + "x" + std::to_string(cols));
+    }
+    
+    // Выделяем память для 2D массива как 1D массив размером rows*cols
+    arrays[arrayName] = std::vector<int>(rows * cols, 0);
+    
+    std::cout << " (выделен 2D массив " << arrayName << "[" << rows << "][" << cols << "])";
+}
+
+bool OPSInterpreter::isArrayName(const std::string& name) const {
+    // Проверяем, является ли имя именем массива
+    return arrays.find(name) != arrays.end() || 
+           (isVariable(name) && name.length() == 1 && std::isupper(name[0]));
 } 

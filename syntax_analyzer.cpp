@@ -101,14 +101,33 @@ void SyntaxAnalyzer::parseStatement() {
 }
 
 void SyntaxAnalyzer::parseDeclaration() {
-    // int x = value;
+    // int x = value; ИЛИ int M[size];
     currentToken++; // пропускаем 'int'
     
     if (currentToken < tokens.size() && tokens[currentToken].getType() == "IDENTIFIER") {
         std::string varName = tokens[currentToken].getValue();
         currentToken++;
         
-        if (currentToken < tokens.size() && tokens[currentToken].getValue() == "=") {
+        // Проверяем на объявление массива M[size]
+        if (currentToken < tokens.size() && tokens[currentToken].getType() == "LEFT_BRACKET") {
+            currentToken++; // пропускаем '['
+            
+            // Парсим размер массива
+            parseExpression(); // генерирует ОПС для размера
+            opsCode.push_back(varName); // имя массива
+            opsCode.push_back("m1"); // команда выделения памяти
+            
+            if (currentToken >= tokens.size() || tokens[currentToken].getType() != "RIGHT_BRACKET") {
+                if (currentToken < tokens.size()) {
+                    error("Expected ']' after array size", tokens[currentToken]);
+                } else {
+                    throw std::runtime_error("Unexpected end of input - missing ']'");
+                }
+            }
+            currentToken++; // пропускаем ']'
+        }
+        else if (currentToken < tokens.size() && tokens[currentToken].getValue() == "=") {
+            // Обычное объявление с инициализацией
             currentToken++; // пропускаем '='
             parseExpression(); // генерирует ОПС для выражения (значение уже в стеке)
             opsCode.push_back(varName); // добавляем имя переменной
