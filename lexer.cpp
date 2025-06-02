@@ -9,7 +9,7 @@ Lexer::Lexer(const std::string& input) : input(input), pos(0), line(1), column(1
 
 void Lexer::initKeywords() {
     keywords = {
-        "int", "float", "char", "if", "else", "while", "for", 
+        "int", "float", "char", "double", "if", "else", "while", "for", 
         "return", "void", "struct", "input", "output", "read", "write"
     };
 }
@@ -65,7 +65,7 @@ void Lexer::initTransitions() {
     // Состояние NUM (числа)
     transitions[{LS::NUM, CC::LETTER}] = {LS::ERR, 25};  // ERR/25
     transitions[{LS::NUM, CC::DIGIT}] = {LS::NUM, 29};   // NUM/29
-    transitions[{LS::NUM, CC::DOT}] = {LS::NUM, 31};     // NUM/31 (десятичная точка)
+    transitions[{LS::NUM, CC::DOT}] = {LS::DECIMAL, 31}; // DECIMAL/31 (переход к десятичной части)
     // Все остальные символы ведут к FIN/30
     for (CC cat : {CC::PLUS, CC::MINUS, CC::STAR, CC::SLASH, CC::PERCENT, CC::EQUAL, 
                    CC::LT, CC::GT, CC::EXCL, CC::AMP, CC::PIPE, CC::SEMICOLON, 
@@ -75,6 +75,20 @@ void Lexer::initTransitions() {
         transitions[{LS::NUM, cat}] = {LS::FIN, 30};
     }
     transitions[{LS::NUM, CC::OTHER}] = {LS::ERR, 25};
+    
+    // Состояние DECIMAL (десятичная часть числа)
+    transitions[{LS::DECIMAL, CC::LETTER}] = {LS::ERR, 25};  // ERR/25
+    transitions[{LS::DECIMAL, CC::DIGIT}] = {LS::DECIMAL, 31}; // DECIMAL/31 (продолжаем накапливать десятичную часть)
+    transitions[{LS::DECIMAL, CC::DOT}] = {LS::ERR, 25};    // ERR/25 (вторая точка недопустима)
+    // Все остальные символы ведут к FIN/31 (завершение double числа)
+    for (CC cat : {CC::PLUS, CC::MINUS, CC::STAR, CC::SLASH, CC::PERCENT, CC::EQUAL, 
+                   CC::LT, CC::GT, CC::EXCL, CC::AMP, CC::PIPE, CC::SEMICOLON, 
+                   CC::COMMA, CC::LPAREN, CC::RPAREN, CC::LBRACE, CC::RBRACE,
+                   CC::LBRACKET, CC::RBRACKET, CC::QUOTE, CC::SQUOTE, CC::SPACE, 
+                   CC::NEWLINE, CC::END_OF_FILE}) {
+        transitions[{LS::DECIMAL, cat}] = {LS::FIN, 31};
+    }
+    transitions[{LS::DECIMAL, CC::OTHER}] = {LS::ERR, 25};
     
     // Состояние STR (строки)
     for (CC cat : {CC::LETTER, CC::DIGIT, CC::PLUS, CC::MINUS, CC::STAR, CC::SLASH, 
@@ -154,8 +168,10 @@ std::string Lexer::getTokenType(int action, const std::string& lexeme) const {
     switch (action) {
         case 1: case 27: case 28: // ID actions
             return keywords.count(lexeme) ? "KEYWORD" : "IDENTIFIER";
-        case 2: case 29: case 30: case 31: // NUM actions
+        case 2: case 29: case 30: // NUM actions - integer numbers
             return "NUMBER";
+        case 31: // NUM action with decimal point - floating point numbers
+            return "DOUBLE_NUMBER";
         case 3: case 4: case 5: case 6: case 7: case 8: case 9: case 10:
         case 11: case 12: case 13: case 35: case 40: case 41: case 44: case 45: case 46:
             return "OPERATOR";

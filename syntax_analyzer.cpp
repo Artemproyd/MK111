@@ -6,12 +6,18 @@
 #include <stdexcept>
 #include <stack>
 #include <fstream>
+#include <memory>
 #ifdef _WIN32
 #include <windows.h>
 #endif
 
 // Конструктор синтаксического анализатора - исправляю порядок инициализации
-SyntaxAnalyzer::SyntaxAnalyzer() : opsGenerator(std::make_unique<OPSGenerator>()), currentToken(0), labelCounter(0) {}
+SyntaxAnalyzer::SyntaxAnalyzer() : opsGenerator(new OPSGenerator()), currentToken(0), labelCounter(0) {}
+
+// Деструктор для освобождения памяти
+SyntaxAnalyzer::~SyntaxAnalyzer() {
+    delete opsGenerator;
+}
 
 // Анализировать токены и генерировать ОПС
 std::vector<OPSCommand> SyntaxAnalyzer::analyze(const std::vector<Token>& inputTokens) {
@@ -70,7 +76,7 @@ void SyntaxAnalyzer::parseStatement() {
     }
     
     if (token.getType() == "KEYWORD") {
-        if (token.getValue() == "int" || token.getValue() == "float" || token.getValue() == "char") {
+        if (token.getValue() == "int" || token.getValue() == "float" || token.getValue() == "char" || token.getValue() == "double") {
             parseDeclaration();
         } else if (token.getValue() == "if") {
             parseIfStatement();
@@ -108,7 +114,7 @@ void SyntaxAnalyzer::parseDeclaration() {
             currentToken++; // пропускаем '['
             
             // Парсим размер массива
-            if (currentToken < tokens.size() && tokens[currentToken].getType() == "NUMBER") {
+            if (currentToken < tokens.size() && (tokens[currentToken].getType() == "NUMBER" || tokens[currentToken].getType() == "DOUBLE_NUMBER")) {
                 std::string size1 = tokens[currentToken].getValue();
                 currentToken++;
                 
@@ -125,7 +131,7 @@ void SyntaxAnalyzer::parseDeclaration() {
                 if (currentToken < tokens.size() && tokens[currentToken].getType() == "LEFT_BRACKET") {
                     currentToken++; // пропускаем '['
                     
-                    if (currentToken < tokens.size() && tokens[currentToken].getType() == "NUMBER") {
+                    if (currentToken < tokens.size() && (tokens[currentToken].getType() == "NUMBER" || tokens[currentToken].getType() == "DOUBLE_NUMBER")) {
                         std::string size2 = tokens[currentToken].getValue();
                         currentToken++;
                         
@@ -165,8 +171,9 @@ void SyntaxAnalyzer::parseDeclaration() {
             // Обычное объявление с инициализацией: int x = 5;
             currentToken++; // пропускаем '='
             parseExpression(); // генерирует ОПС для выражения (значение уже в стеке)
-            opsCode.push_back(varName); // добавляем имя переменной
-            opsCode.push_back(":="); // добавляем операцию присваивания
+            opsCode.push_back(type);     // добавляем тип переменной
+            opsCode.push_back(varName);  // добавляем имя переменной
+            opsCode.push_back("declare_assign"); // специальная команда объявления с присваиванием
         } else {
             // Простое объявление без инициализации: int x;
             // В ОПС это может не генерировать команд, или генерировать команду объявления
@@ -405,7 +412,7 @@ void SyntaxAnalyzer::parseExpression() {
         
         const Token& token = tokens[currentToken];
         
-        if (token.getType() == "NUMBER" || token.getType() == "IDENTIFIER") {
+        if (token.getType() == "NUMBER" || token.getType() == "DOUBLE_NUMBER" || token.getType() == "IDENTIFIER") {
             opsCode.push_back(token.getValue()); // добавляем операнд
             currentToken++;
             
@@ -519,9 +526,48 @@ void SyntaxAnalyzer::parseCondition() {
         
         const Token& token = tokens[currentToken];
         
-        if (token.getType() == "NUMBER" || token.getType() == "IDENTIFIER") {
+        if (token.getType() == "NUMBER" || token.getType() == "DOUBLE_NUMBER" || token.getType() == "IDENTIFIER") {
             opsCode.push_back(token.getValue()); // добавляем операнд
             currentToken++;
+            
+            // Проверяем на доступ к массиву M[i] в условии
+            if (currentToken < tokens.size() && tokens[currentToken].getType() == "LEFT_BRACKET") {
+                currentToken++; // пропускаем '['
+                parseCondition(); // парсим индекс рекурсивно
+                
+                // Проверяем на второй индекс для двумерного массива M[i][j]
+                if (currentToken < tokens.size() && tokens[currentToken].getType() == "RIGHT_BRACKET") {
+                    currentToken++; // пропускаем ']'
+                    
+                    if (currentToken < tokens.size() && tokens[currentToken].getType() == "LEFT_BRACKET") {
+                        currentToken++; // пропускаем '['
+                        parseCondition(); // парсим второй индекс рекурсивно
+                        opsCode.push_back("array_get_2d"); // операция получения элемента 2D массива
+                        
+                        if (currentToken >= tokens.size() || tokens[currentToken].getType() != "RIGHT_BRACKET") {
+                            if (currentToken < tokens.size()) {
+                                error("Expected ']' after second array index", tokens[currentToken]);
+                            } else {
+                                throw std::runtime_error("Unexpected end of input - missing second ']'");
+                            }
+                        }
+                        currentToken++; // пропускаем ']'
+                    } else {
+                        // Одномерный массив
+                        opsCode.push_back("array_get"); // операция получения элемента массива
+                    }
+                } else {
+                    if (currentToken >= tokens.size() || tokens[currentToken].getType() != "RIGHT_BRACKET") {
+                        if (currentToken < tokens.size()) {
+                            error("Expected ']' after array index", tokens[currentToken]);
+                        } else {
+                            throw std::runtime_error("Unexpected end of input - missing ']'");
+                        }
+                    }
+                    currentToken++; // пропускаем ']'
+                    opsCode.push_back("array_get"); // операция получения элемента массива
+                }
+            }
         }
         else if (token.getType() == "OPERATOR") {
             std::string op = token.getValue();
@@ -547,6 +593,10 @@ void SyntaxAnalyzer::parseCondition() {
         }
         else if (token.getType() == "RIGHT_PAREN") {
             // Останавливаемся на закрывающей скобке, не потребляем её
+            break;
+        }
+        else if (token.getType() == "LEFT_BRACKET" || token.getType() == "RIGHT_BRACKET") {
+            // Скобки массивов уже обработаны выше, пропускаем оставшиеся
             break;
         }
         else {
@@ -580,7 +630,7 @@ void SyntaxAnalyzer::processToken(const Token& token) {
 }
 
 InputSymbol SyntaxAnalyzer::convertTokenType(const std::string& type) const {
-    if (type == "NUMBER") return InputSymbol::NUMBER;
+    if (type == "NUMBER" || type == "DOUBLE_NUMBER") return InputSymbol::NUMBER;
     if (type == "IDENTIFIER") return InputSymbol::IDENTIFIER;
     if (type == "OPERATOR") return InputSymbol::OPERATOR;
     if (type == "LEFT_PAREN") return InputSymbol::LEFT_PAREN;
@@ -877,7 +927,7 @@ void SyntaxAnalyzer::parseSimpleExpression() {
     
     const Token& token = tokens[currentToken];
     
-    if (token.getType() == "NUMBER" || token.getType() == "IDENTIFIER") {
+    if (token.getType() == "NUMBER" || token.getType() == "DOUBLE_NUMBER" || token.getType() == "IDENTIFIER") {
         opsCode.push_back(token.getValue()); // добавляем операнд
         currentToken++;
     } else {
@@ -912,7 +962,7 @@ void SyntaxAnalyzer::parseForStatement() {
         }
     }
     
-    // Проверяем ';' после инициализации (если не была обработана в parseDeclaration/parseAssignment)
+    // Пропускаем ';' после инициализации (если не была обработана в parseDeclaration/parseAssignment)
     if (currentToken < tokens.size() && tokens[currentToken].getType() == "SEMICOLON") {
         currentToken++; // пропускаем ';'
     }
@@ -920,7 +970,6 @@ void SyntaxAnalyzer::parseForStatement() {
     // Генерируем метки для цикла
     std::string startLabel = "m" + std::to_string(labelCounter++);
     std::string endLabel = "m" + std::to_string(labelCounter++);
-    std::string incrementLabel = "m" + std::to_string(labelCounter++);
     
     opsCode.push_back(startLabel + ":"); // метка начала цикла
     
@@ -935,20 +984,22 @@ void SyntaxAnalyzer::parseForStatement() {
         currentToken++; // пропускаем ';'
     }
     
-    // 3. Сохраняем инкремент для обработки после тела цикла
+    // 3. Сохраняем позицию начала инкремента и пропускаем его, чтобы дойти до тела
     size_t incrementStart = currentToken;
     
-    // Пропускаем инкремент, чтобы добраться до тела цикла
+    // Находим конец инкремента (до закрывающей скобки)
     int parenCount = 0;
     while (currentToken < tokens.size()) {
-        if (tokens[currentToken].getType() == "LEFT_PAREN") parenCount++;
-        if (tokens[currentToken].getType() == "RIGHT_PAREN") {
-            if (parenCount == 0) break;
+        if (tokens[currentToken].getType() == "LEFT_PAREN") {
+            parenCount++;
+        } else if (tokens[currentToken].getType() == "RIGHT_PAREN") {
+            if (parenCount == 0) {
+                break; // Нашли закрывающую скобку for
+            }
             parenCount--;
         }
         currentToken++;
     }
-    
     size_t incrementEnd = currentToken;
     
     // Пропускаем ')'
@@ -970,15 +1021,17 @@ void SyntaxAnalyzer::parseForStatement() {
         }
     }
     
-    // 5. Обрабатываем инкремент
-    size_t savedToken = currentToken;
+    // 5. Теперь обрабатываем инкремент - возвращаемся к сохраненной позиции
+    size_t savedCurrentToken = currentToken;
     currentToken = incrementStart;
     
+    // Парсим инкремент как обычное присваивание
     if (currentToken < incrementEnd) {
-        parseAssignment(); // парсим инкремент как присваивание
+        parseAssignment(); // это сгенерирует правильную ОПС для i = i + 1
     }
     
-    currentToken = savedToken;
+    // Восстанавливаем позицию
+    currentToken = savedCurrentToken;
     
     // 6. Генерируем переход на начало цикла
     opsCode.push_back(startLabel); // метка для безусловного перехода

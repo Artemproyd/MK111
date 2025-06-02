@@ -40,7 +40,38 @@ if (x > 0) {
     }
 } 
 
+int arr[4];
 
+arr[0] = 5;
+arr[1] = 8;
+arr[2] = 3;
+arr[3] = 3;
+
+for (int i = 0; i < 4; i = i + 1){
+    write(arr[i]);
+}
+int i = 0;
+int addd = 0;
+for (i = 0; i < 4; i = i + 1){
+    int curr = arr[i];
+    
+    int indx = i;
+    int new = curr;
+    
+    for (addd = i + 1; addd < 4; addd = addd + 1){
+        if (arr[addd] < new) {
+            indx = addd;
+            new = arr[addd];
+        }
+    }
+    
+    arr[indx] = curr;
+    arr[i] = new;
+}
+
+for (int i = 0; i < 4; i = i + 1){
+    write(arr[i]);
+}
 
 ==========================================
 

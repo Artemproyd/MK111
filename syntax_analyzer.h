@@ -15,6 +15,7 @@ class OPSGenerator;
 class SyntaxAnalyzer {
 public:
     SyntaxAnalyzer();
+    ~SyntaxAnalyzer();
     
     // Анализ последовательности токенов
     std::vector<OPSCommand> analyze(const std::vector<Token>& tokens);
@@ -30,7 +31,7 @@ public:
 
 private:
     StackMachine stackMachine;
-    std::unique_ptr<OPSGenerator> opsGenerator;
+    OPSGenerator* opsGenerator;
     std::vector<Token> tokens;
     size_t currentToken;
     int labelCounter;

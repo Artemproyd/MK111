@@ -42,9 +42,15 @@ void OPSInterpreter::execute(const std::vector<std::string>& opsCommands) {
         
         // Обрабатываем команду
         if (isNumber(command)) {
-            // Число - помещаем в стек
+            // Целое число - помещаем в стек
             int value = std::stoi(command);
-            pushStack(value);
+            pushStack(Value(value));
+            std::cout << " → стек: " << value;
+        }
+        else if (isDoubleNumber(command)) {
+            // Число с плавающей точкой - помещаем в стек
+            double value = std::stod(command);
+            pushStack(Value(value));
             std::cout << " → стек: " << value;
         }
         else if (command == ":=") {
@@ -107,6 +113,11 @@ void OPSInterpreter::execute(const std::vector<std::string>& opsCommands) {
             executeDeclare();
             std::cout << " → объявление переменной";
         }
+        else if (command == "declare_assign") {
+            // Объявление переменной с типизированным присваиванием
+            executeDeclareAssign();
+            std::cout << " → объявление с присваиванием";
+        }
         else if (command == "jf") {
             // Условный переход - метка должна быть предыдущей командой
             if (programCounter > 0) {
@@ -154,18 +165,29 @@ void OPSInterpreter::execute(const std::vector<std::string>& opsCommands) {
         else if (isVariable(command)) {
             // Проверяем, следует ли за переменной команда присваивания или ввода/вывода
             bool isAssignmentTarget = false;
+            bool isTypeKeyword = false;
+            
+            // Проверяем, является ли это ключевым словом типа
+            if (command == "int" || command == "double" || command == "float" || command == "char") {
+                isTypeKeyword = true;
+            }
+            
             if (programCounter + 1 < commands.size() && 
                 (commands[programCounter + 1] == ":=" || 
-                 commands[programCounter + 1] == "r")) {
+                 commands[programCounter + 1] == "r" ||
+                 commands[programCounter + 1] == "declare_assign")) {
                 isAssignmentTarget = true;
             }
             
-            if (isAssignmentTarget) {
-                // Переменная перед := или r - это цель, не загружаем в стек
+            if (isTypeKeyword) {
+                // Ключевые слова типов - не загружаем в стек
+                std::cout << " → тип данных: " << command;
+            } else if (isAssignmentTarget) {
+                // Переменная перед := или r или declare_assign - это цель, не загружаем в стек
                 std::cout << " → цель для " << commands[programCounter + 1] << ": " << command;
             } else {
                 // Обычная переменная или переменная перед w - помещаем её значение в стек
-                int value = getVariable(command);
+                Value value = getVariable(command);
                 pushStack(value);
                 std::cout << " → стек: " << command << "=" << value;
             }
@@ -225,6 +247,27 @@ bool OPSInterpreter::isNumber(const std::string& str) const {
     return true;
 }
 
+bool OPSInterpreter::isDoubleNumber(const std::string& str) const {
+    if (str.empty()) return false;
+    
+    size_t start = 0;
+    if (str[0] == '-' || str[0] == '+') {
+        start = 1;
+        if (str.length() == 1) return false;
+    }
+    
+    bool hasDot = false;
+    for (size_t i = start; i < str.length(); ++i) {
+        if (str[i] == '.') {
+            if (hasDot) return false; // Вторая точка
+            hasDot = true;
+        } else if (!std::isdigit(str[i])) {
+            return false;
+        }
+    }
+    return hasDot; // Должна быть точка для double
+}
+
 bool OPSInterpreter::isVariable(const std::string& str) const {
     if (str.empty()) return false;
     if (!std::isalpha(str[0]) && str[0] != '_') return false;
@@ -245,7 +288,8 @@ bool OPSInterpreter::isOperator(const std::string& str) const {
 bool OPSInterpreter::isCommand(const std::string& str) const {
     return str == ":=" || str == "jf" || str == "j" || str == "r" || str == "w" ||
            str == "alloc_array" || str == "array_get" || str == "array_set" || str == "array_read" ||
-           str == "alloc_array_2d" || str == "array_get_2d" || str == "array_set_2d" || str == "array_read_2d" || str == "declare";
+           str == "alloc_array_2d" || str == "array_get_2d" || str == "array_set_2d" || str == "array_read_2d" || 
+           str == "declare" || str == "declare_assign";
 }
 
 void OPSInterpreter::executeArithmetic(const std::string& op) {
@@ -253,9 +297,9 @@ void OPSInterpreter::executeArithmetic(const std::string& op) {
         error("Недостаточно операндов для операции " + op);
     }
     
-    int b = popStack(); // Второй операнд
-    int a = popStack(); // Первый операнд
-    int result = 0;
+    Value b = popStack(); // Второй операнд
+    Value a = popStack(); // Первый операнд
+    Value result;
     
     if (op == "+") {
         result = a + b;
@@ -264,7 +308,7 @@ void OPSInterpreter::executeArithmetic(const std::string& op) {
     } else if (op == "*") {
         result = a * b;
     } else if (op == "/") {
-        if (b == 0) {
+        if ((b.isInt() && b.asInt() == 0) || (b.isDouble() && b.asDouble() == 0.0)) {
             error("Деление на ноль");
         }
         result = a / b;
@@ -278,16 +322,28 @@ void OPSInterpreter::executeComparison(const std::string& op) {
         error("Недостаточно операндов для сравнения " + op);
     }
     
-    int b = popStack(); // Второй операнд
-    int a = popStack(); // Первый операнд
-    int result = 0;
+    Value b = popStack(); // Второй операнд
+    Value a = popStack(); // Первый операнд
+    Value result;
     
     if (op == ">") {
-        result = (a > b) ? 1 : 0;
+        if (a.isDouble() || b.isDouble()) {
+            result = Value(a.asDouble() > b.asDouble() ? 1 : 0);
+        } else {
+            result = Value(a.asInt() > b.asInt() ? 1 : 0);
+        }
     } else if (op == "<") {
-        result = (a < b) ? 1 : 0;
+        if (a.isDouble() || b.isDouble()) {
+            result = Value(a.asDouble() < b.asDouble() ? 1 : 0);
+        } else {
+            result = Value(a.asInt() < b.asInt() ? 1 : 0);
+        }
     } else if (op == "==") {
-        result = (a == b) ? 1 : 0;
+        if (a.isDouble() || b.isDouble()) {
+            result = Value(a.asDouble() == b.asDouble() ? 1 : 0);
+        } else {
+            result = Value(a.asInt() == b.asInt() ? 1 : 0);
+        }
     }
     
     pushStack(result);
@@ -298,7 +354,7 @@ void OPSInterpreter::executeAssignment() {
         error("Недостаточно операндов для присваивания");
     }
     
-    int value = popStack(); // Значение для присваивания
+    Value value = popStack(); // Значение для присваивания
     
     // Имя переменной должно быть прямо перед командой ":="
     if (programCounter == 0) {
@@ -329,10 +385,10 @@ void OPSInterpreter::executeConditionalJump(const std::string& label) {
         error("Нет условия для условного перехода");
     }
     
-    int condition = popStack();
+    Value condition = popStack();
     
     // jf - jump if false (переход если условие ложно)
-    if (condition == 0) {
+    if ((condition.isInt() && condition.asInt() == 0) || (condition.isDouble() && condition.asDouble() == 0.0)) {
         // Условие ложно - переходим к метке
         auto it = labels.find(label);
         if (it != labels.end()) {
@@ -347,34 +403,42 @@ void OPSInterpreter::executeConditionalJump(const std::string& label) {
     }
 }
 
-int OPSInterpreter::popStack() {
+Value OPSInterpreter::popStack() {
     if (operandStack.empty()) {
         error("Попытка извлечения из пустого стека");
     }
     
-    int value = operandStack.top();
+    Value value = operandStack.top();
     operandStack.pop();
     return value;
 }
 
-void OPSInterpreter::pushStack(int value) {
+void OPSInterpreter::pushStack(const Value& value) {
     operandStack.push(value);
 }
 
-void OPSInterpreter::setVariable(const std::string& name, int value) {
+void OPSInterpreter::setVariable(const std::string& name, const Value& value) {
     variables[name] = value;
 }
 
-int OPSInterpreter::getVariable(const std::string& name) const {
+void OPSInterpreter::setVariable(const std::string& name, int value) {
+    variables[name] = Value(value);
+}
+
+void OPSInterpreter::setVariable(const std::string& name, double value) {
+    variables[name] = Value(value);
+}
+
+Value OPSInterpreter::getVariable(const std::string& name) const {
     auto it = variables.find(name);
     if (it != variables.end()) {
         return it->second;
     }
-    return 0; // Неинициализированные переменные имеют значение 0
+    return Value(); // Неинициализированные переменные имеют значение 0
 }
 
 void OPSInterpreter::printState() const {
-    std::cout << "\n📊 СОСТОЯНИЕ ИНТЕРПРЕТАТОРА:" << std::endl;
+    std::cout << "\n СОСТОЯНИЕ ИНТЕРПРЕТАТОРА:" << std::endl;
     
     std::cout << "Переменные:" << std::endl;
     if (variables.empty()) {
@@ -424,15 +488,15 @@ void OPSInterpreter::printState() const {
     if (operandStack.empty()) {
         std::cout << "  (пустой)" << std::endl;
     } else {
-        std::stack<int> tempStack = operandStack;
-        std::vector<int> stackContents;
+        std::stack<Value> tempStack = operandStack;
+        std::vector<Value> stackContents;
         while (!tempStack.empty()) {
             stackContents.push_back(tempStack.top());
             tempStack.pop();
         }
         std::cout << "  ";
         for (int i = static_cast<int>(stackContents.size()) - 1; i >= 0; --i) {
-            std::cout << stackContents[i] << " ";
+            std::cout << stackContents[i];
         }
         std::cout << "(вершина справа)" << std::endl;
     }
@@ -477,15 +541,15 @@ void OPSInterpreter::executeRead() {
             std::string arrayName = commands[programCounter - 3]; // M
             std::string indexVar = commands[programCounter - 2];   // a
             
-            int index = getVariable(indexVar);
+            int index = getVariable(indexVar).asInt();
             
             if (arrays.find(arrayName) == arrays.end()) {
                 // Автоматически создаем массив если его нет
-                arrays[arrayName] = std::vector<int>(10, 0); // размер по умолчанию
+                arrays[arrayName] = std::vector<Value>(10, Value(0)); // размер по умолчанию
             }
             
             if (index >= 0 && index < static_cast<int>(arrays[arrayName].size())) {
-                arrays[arrayName][index] = value;
+                arrays[arrayName][index] = Value(value);
                 std::cout << "  Прочитано в " << arrayName << "[" << index << "] = " << value;
             } else {
                 error("Индекс массива вне границ при записи: " + std::to_string(index));
@@ -505,7 +569,7 @@ void OPSInterpreter::executeRead() {
             error("Неверное имя переменной для чтения: " + varName);
         }
         
-        variables[varName] = value;
+        variables[varName] = Value(value);
         std::cout << "  Прочитано: " << varName << " = " << value;
     }
 }
@@ -516,39 +580,41 @@ void OPSInterpreter::executeWrite() {
         error("Нет значения для вывода");
     }
     
-    int value = popStack();
+    Value value = popStack();
     std::cout << "\n  ВЫВОД: " << value;
 }
 
 void OPSInterpreter::executeArrayAlloc() {
     // Формат: type arrayName size alloc_array → выделяет память для массива arrayName размером size
-    if (operandStack.size() < 1) {
-        error("Недостаточно операндов для выделения памяти");
+    
+    // Размер должен быть в стеке (последний элемент перед командой)
+    // Имя массива и тип - в командах перед alloc_array
+    if (programCounter < 3) {
+        error("Недостаточно аргументов для выделения памяти массива");
     }
     
-    int size = popStack(); // размер из стека
+    std::string arraySize = commands[programCounter - 1]; // размер массива
+    std::string arrayName = commands[programCounter - 2]; // имя массива
+    std::string arrayType = commands[programCounter - 3]; // тип массива
     
-    // Ищем имя массива в предыдущих командах (должно быть перед размером)
-    std::string arrayName;
-    for (int i = programCounter - 1; i >= 0; i--) {
-        if (isVariable(commands[i]) && !isNumber(commands[i])) {
-            arrayName = commands[i];
-            break;
-        }
+    if (!isNumber(arraySize)) {
+        error("Неверный размер массива: " + arraySize);
     }
     
-    if (arrayName.empty()) {
-        error("Не найдено имя массива для выделения памяти");
+    int size = std::stoi(arraySize);
+    
+    if (!isVariable(arrayName)) {
+        error("Неверное имя массива для выделения памяти: " + arrayName);
     }
     
     if (size < 0) {
         error("Неверный размер массива: " + std::to_string(size));
     }
     
-    // Выделяем память для массива размером size+1, чтобы индекс size был валидным
-    arrays[arrayName] = std::vector<int>(size + 1, 0);
+    // Выделяем память для массива размером size (без +1)
+    arrays[arrayName] = std::vector<Value>(size, Value(0));
     
-    std::cout << " (выделен массив " << arrayName << "[" << (size + 1) << "], индексы 0-" << size << ")";
+    std::cout << " (выделен массив " << arrayType << " " << arrayName << "[" << size << "], индексы 0-" << (size - 1) << ")";
 }
 
 void OPSInterpreter::executeArrayGet() {
@@ -557,7 +623,7 @@ void OPSInterpreter::executeArrayGet() {
         error("Недостаточно операндов для получения элемента массива");
     }
     
-    int index = popStack();  // Индекс массива
+    int index = popStack().asInt();  // Индекс массива
     
     // Имя массива должно быть перед индексом (за 2 позиции назад)
     if (programCounter < 2) {
@@ -590,8 +656,8 @@ void OPSInterpreter::executeArraySet() {
         error("Недостаточно операндов для установки элемента массива");
     }
     
-    int value = popStack();  // Значение для установки (последнее в стеке)
-    int index = popStack();   // Индекс массива (предпоследнее в стеке)
+    Value value = popStack();  // Значение для установки (последнее в стеке)
+    int index = popStack().asInt();   // Индекс массива (предпоследнее в стеке)
     
     // Имя массива должно быть за 3 позиции назад (arrayName index value array_set)
     if (programCounter < 3) {
@@ -623,7 +689,7 @@ void OPSInterpreter::executeArrayRead() {
         error("Недостаточно операндов для чтения элемента массива");
     }
     
-    int index = popStack();  // Индекс массива
+    int index = popStack().asInt();  // Индекс массива
     
     // Имя массива должно быть перед индексом (за 2 позиции назад)
     if (programCounter < 2) {
@@ -651,7 +717,7 @@ void OPSInterpreter::executeArrayRead() {
     std::cin >> value;
     
     // Записываем значение в массив
-    arrays[arrayName][index] = value;
+    arrays[arrayName][index] = Value(value);
     std::cout << "  Прочитано в " << arrayName << "[" << index << "] = " << value;
 }
 
@@ -661,7 +727,7 @@ void OPSInterpreter::executeDeclare() {
         error("Недостаточно операндов для объявления переменной");
     }
     
-    int value = popStack();  // Начальное значение переменной
+    int value = popStack().asInt();  // Начальное значение переменной
     
     if (programCounter < 2) {
         error("Не найдено имя переменной для объявления");
@@ -673,8 +739,41 @@ void OPSInterpreter::executeDeclare() {
         error("Неверное имя переменной для объявления: " + varName);
     }
     
-    variables[varName] = value;
+    variables[varName] = Value(value);
     std::cout << " (" << varName << " = " << value << ")";
+}
+
+void OPSInterpreter::executeDeclareAssign() {
+    // Формат: value type varName declare_assign → объявляет типизированную переменную
+    if (operandStack.size() < 1) {
+        error("Недостаточно операндов для типизированного объявления");
+    }
+    
+    Value value = popStack();  // Значение для присваивания
+    
+    if (programCounter < 2) {
+        error("Не найдено имя переменной для типизированного объявления");
+    }
+    
+    std::string varName = commands[programCounter - 1]; // имя переменной
+    std::string varType = commands[programCounter - 2]; // тип переменной
+    
+    if (!isVariable(varName)) {
+        error("Неверное имя переменной для объявления: " + varName);
+    }
+    
+    // Приводим значение к нужному типу
+    Value typedValue;
+    if (varType == "int") {
+        typedValue = Value(value.asInt()); // принудительно int
+    } else if (varType == "double" || varType == "float") {
+        typedValue = Value(value.asDouble()); // принудительно double
+    } else {
+        typedValue = value; // для char и других типов оставляем как есть
+    }
+    
+    variables[varName] = typedValue;
+    std::cout << " (" << varType << " " << varName << " = " << typedValue << ")";
 }
 
 bool OPSInterpreter::isArrayName(const std::string& name) const {
@@ -685,24 +784,26 @@ bool OPSInterpreter::isArrayName(const std::string& name) const {
 
 void OPSInterpreter::executeArrayAlloc2D() {
     // Формат: type arrayName rows cols alloc_array_2d → выделяет память для двумерного массива arrayName размером rows x cols
-    if (operandStack.size() < 2) {
-        error("Недостаточно операндов для выделения памяти");
+    
+    // Размеры должны быть в командах перед alloc_array_2d
+    if (programCounter < 4) {
+        error("Недостаточно аргументов для выделения памяти двумерного массива");
     }
     
-    int cols = popStack(); // количество столбцов
-    int rows = popStack(); // количество строк
+    std::string colsStr = commands[programCounter - 1]; // количество столбцов
+    std::string rowsStr = commands[programCounter - 2]; // количество строк
+    std::string arrayName = commands[programCounter - 3]; // имя массива
+    std::string arrayType = commands[programCounter - 4]; // тип массива
     
-    // Ищем имя массива в предыдущих командах (должно быть перед количеством строк и столбцов)
-    std::string arrayName;
-    for (int i = programCounter - 2; i >= 0; i--) {
-        if (isVariable(commands[i]) && !isNumber(commands[i])) {
-            arrayName = commands[i];
-            break;
-        }
+    if (!isNumber(rowsStr) || !isNumber(colsStr)) {
+        error("Неверные размеры массива: " + rowsStr + " x " + colsStr);
     }
     
-    if (arrayName.empty()) {
-        error("Не найдено имя массива для выделения памяти");
+    int rows = std::stoi(rowsStr);
+    int cols = std::stoi(colsStr);
+    
+    if (!isVariable(arrayName)) {
+        error("Неверное имя массива для выделения памяти: " + arrayName);
     }
     
     if (rows < 0 || cols < 0) {
@@ -710,9 +811,9 @@ void OPSInterpreter::executeArrayAlloc2D() {
     }
     
     // Выделяем память для двумерного массива
-    arrays2D[arrayName] = std::vector<std::vector<int>>(rows, std::vector<int>(cols, 0));
+    arrays2D[arrayName] = std::vector<std::vector<Value>>(rows, std::vector<Value>(cols, Value(0)));
     
-    std::cout << " (выделен двумерный массив " << arrayName << "[" << rows << "][" << cols << "])";
+    std::cout << " (выделен двумерный массив " << arrayType << " " << arrayName << "[" << rows << "][" << cols << "])";
 }
 
 void OPSInterpreter::executeArrayGet2D() {
@@ -721,8 +822,8 @@ void OPSInterpreter::executeArrayGet2D() {
         error("Недостаточно операндов для получения элемента двумерного массива");
     }
     
-    int col = popStack();  // Индекс столбца
-    int row = popStack();  // Индекс строки
+    int col = popStack().asInt();  // Индекс столбца
+    int row = popStack().asInt();  // Индекс строки
     
     // Имя массива должно быть за 3 позиции назад (arrayName row col array_get_2d)
     if (programCounter < 3) {
@@ -756,9 +857,9 @@ void OPSInterpreter::executeArraySet2D() {
         error("Недостаточно операндов для установки элемента двумерного массива");
     }
     
-    int value = popStack();  // Значение для установки (последнее в стеке)
-    int col = popStack();    // Индекс столбца (предпоследнее в стеке)
-    int row = popStack();    // Индекс строки (первое в стеке)
+    Value value = popStack();  // Значение для установки (последнее в стеке)
+    int col = popStack().asInt();    // Индекс столбца (предпоследнее в стеке)
+    int row = popStack().asInt();    // Индекс строки (первое в стеке)
     
     // Имя массива должно быть за 4 позиции назад (arrayName row col value array_set_2d)
     if (programCounter < 4) {
@@ -791,8 +892,8 @@ void OPSInterpreter::executeArrayRead2D() {
         error("Недостаточно операндов для чтения элемента двумерного массива");
     }
     
-    int col = popStack();  // Индекс столбца
-    int row = popStack();  // Индекс строки
+    int col = popStack().asInt();  // Индекс столбца
+    int row = popStack().asInt();  // Индекс строки
     
     // Имя массива должно быть за 3 позиции назад (arrayName row col array_read_2d)
     if (programCounter < 3) {
@@ -821,6 +922,6 @@ void OPSInterpreter::executeArrayRead2D() {
     std::cin >> value;
     
     // Записываем значение в массив
-    arrays2D[arrayName][row][col] = value;
+    arrays2D[arrayName][row][col] = Value(value);
     std::cout << "  Прочитано в " << arrayName << "[" << row << "][" << col << "] = " << value;
 } 
