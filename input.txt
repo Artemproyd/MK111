@@ -1,4 +1,29 @@
-int m[4];
+int len;
+read(len);
 
-read(m[10]);
-write(m[10]);
+int arr[100];
+
+for (int i = 0; i < len; i = i + 1){
+    read(arr[i]);
+}
+
+for (int i = 0; i < len; i = i + 1){
+    int curr = arr[i];
+    
+    int indx = i;
+    int new = curr;
+    
+    for (int k = i + 1; k < len; k = k + 1){
+        if (arr[k] < new) {
+            indx = k;
+            new = arr[k];
+        }
+    }
+    
+    arr[indx] = curr;
+    arr[i] = new;
+}
+
+for (int i = 0; i < len; i = i + 1){
+    write(arr[i]);
+}

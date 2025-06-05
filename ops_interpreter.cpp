@@ -530,7 +530,7 @@ void OPSInterpreter::error(const std::string& message) const {
 void OPSInterpreter::executeRead() {
     // Операция чтения - запрашиваем значение у пользователя
     std::cout << "\n  Введите значение: ";
-    int value;
+    double value;
     std::cin >> value;
     
     // Проверяем, была ли перед командой r операция индексации i
@@ -713,7 +713,7 @@ void OPSInterpreter::executeArrayRead() {
     
     // Запрашиваем ввод от пользователя
     std::cout << "\n  Введите значение для " << arrayName << "[" << index << "]: ";
-    int value;
+    double value;
     std::cin >> value;
     
     // Записываем значение в массив
@@ -918,7 +918,7 @@ void OPSInterpreter::executeArrayRead2D() {
     
     // Запрашиваем ввод от пользователя
     std::cout << "\n  Введите значение для " << arrayName << "[" << row << "][" << col << "]: ";
-    int value;
+    double value;
     std::cin >> value;
     
     // Записываем значение в массив
